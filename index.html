@@ -105,6 +105,7 @@
   .keys-hint { position: fixed; bottom: 92px; left: 0; right: 0; text-align: center;
     font-size: 12px; color: var(--muted); z-index: 4; pointer-events: none; }
   @media (pointer: coarse) { .keys-hint { display: none; } }
+  #audio-out { display: none; }
 </style>
 </head>
 <body>
@@ -178,6 +179,9 @@
     </div>
   </main>
 
+  <!-- remote voice elements live here (never visible) -->
+  <div id="audio-out"></div>
+
   <script src="config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.js"></script>
   <script>
@@ -204,7 +208,7 @@
     roomName: $("room-name"), roomCount: $("room-count"), btnCopy: $("btn-copy"),
     roomStatus: $("room-status"),
     btnMute: $("btn-mute"), btnLeave: $("btn-leave"), localFill: $("local-fill"),
-    gameCanvas: $("game-canvas"),
+    gameCanvas: $("game-canvas"), audioOut: $("audio-out"),
     btnLeft: $("btn-left"), btnRight: $("btn-right"), btnJump: $("btn-jump"),
   };
 
@@ -234,12 +238,13 @@
   let testStream = null;       // mic-test stream (pre-join only)
   let muted = false;
   const speaking = new Set();  // identities of current active speakers
-  const audioRoutes = new Map(); // identity -> { src, gain } for proximity voice
 
-  // ── 3. shared audio context (meter + remote voice playback) ────
-  // Remote voices are routed through GainNodes — that is what makes
-  // per-person proximity volume work (and it works on iOS too, unlike
-  // setting .volume on <audio> elements).
+  // ── 3. shared audio context (mic level meter only) ─────────────
+  // Remote voices play through plain <audio> elements — the most
+  // reliable path across devices — and the game sets each element's
+  // .volume every frame for the proximity fade.
+  // NOTE: iOS Safari ignores element.volume — on iPhones everyone is
+  // heard at full volume regardless of distance (Android/desktop are fine).
   let audioCtx = null, analyser = null, meterRaf = 0, meter = null;
 
   function ensureAudioCtx() {
@@ -249,25 +254,9 @@
     if (audioCtx.state === "suspended") audioCtx.resume();
     return audioCtx;
   }
-  // Browsers can re-suspend audio; any tap while in the room revives it.
   window.addEventListener("pointerdown", () => {
-    if (room && audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
   });
-
-  function routeRemoteAudio(track, identity) {
-    const ctx2 = ensureAudioCtx();
-    const src = ctx2.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
-    const gain = ctx2.createGain();
-    src.connect(gain); gain.connect(ctx2.destination);
-    audioRoutes.set(identity, { src, gain });
-  }
-  function unrouteRemoteAudio(identity) {
-    const r = audioRoutes.get(identity);
-    if (r) { try { r.src.disconnect(); r.gain.disconnect(); } catch (_) {} audioRoutes.delete(identity); }
-  }
-  function clearAudioRoutes() {
-    for (const id of [...audioRoutes.keys()]) unrouteRemoteAudio(id);
-  }
 
   function startMeter(mediaStream, fillEl, hintEl) {
     stopMeter();
@@ -389,17 +378,24 @@
 
   function wireRoomEvents(r) {
     r.on(LK.RoomEvent.TrackSubscribed, (track, pub, participant) => {
-      if (track.kind === LK.Track.Kind.Audio) routeRemoteAudio(track, participant.identity);
+      if (track.kind !== LK.Track.Kind.Audio) return;
+      const a = track.attach();
+      a.dataset.identity = participant.identity;
+      el.audioOut.appendChild(a);
     });
-    r.on(LK.RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
-      if (track.kind === LK.Track.Kind.Audio) unrouteRemoteAudio(participant.identity);
+    r.on(LK.RoomEvent.TrackUnsubscribed, (track) => {
+      track.detach().forEach((n) => n.remove());
     });
     r.on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
       speaking.clear();
       speakers.forEach((p) => speaking.add(p.identity));
     });
     r.on(LK.RoomEvent.ParticipantConnected, updateCount);
-    r.on(LK.RoomEvent.ParticipantDisconnected, (p) => { unrouteRemoteAudio(p.identity); updateCount(); });
+    r.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
+      const a = el.audioOut.querySelector('[data-identity="' + CSS.escape(p.identity) + '"]');
+      if (a) a.remove();
+      updateCount();
+    });
 
     r.on(LK.RoomEvent.Reconnecting, () => setStatus(el.roomStatus, "Connection lost — reconnecting…", "err"));
     r.on(LK.RoomEvent.Reconnected, () => setStatus(el.roomStatus, "Reconnected.", "ok"));
@@ -465,7 +461,7 @@
 
   function exitRoomUI() {
     Game.stop();
-    clearAudioRoutes();
+    el.audioOut.innerHTML = "";
     stopMeter();
     if (audioCtx && audioCtx.state !== "closed") audioCtx.close().catch(() => {});
     audioCtx = null;
@@ -776,13 +772,12 @@
       }
     }
 
-    // ── proximity voice: volume = f(distance), silent at world.hear ──
+    // ── proximity voice: element volume = f(distance), 0 at world.hear ──
     function applyProximity() {
-      for (const [id, route] of audioRoutes) {
-        const r = remotes.get(id);
-        let v = 1;
-        if (r) v = clamp(1 - Math.abs(r.x - me.x) / world.hear, 0, 1);
-        route.gain.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
+      const kids = el.audioOut.children;
+      for (let i = 0; i < kids.length; i++) {
+        const r = remotes.get(kids[i].dataset.identity);
+        kids[i].volume = r ? clamp(1 - Math.abs(r.x - me.x) / world.hear, 0, 1) : 1;
       }
     }
 
