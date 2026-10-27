@@ -9,7 +9,7 @@
 //  file and your settings survive every update.
 // ═══════════════════════════════════════════════════════════════════
 
-const APP_CONFIG = {
+window.APP_CONFIG = {
   // From Part 2 — your Cloudflare Worker address (no trailing slash).
   // Looks like:  https://voice-room.YOURNAME.workers.dev
   WORKER_URL: "https://artemswebgameworker.bokhrenkovr.workers.dev",
