@@ -10,11 +10,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 window.APP_CONFIG = {
-  // From Part 2 — your Cloudflare Worker address (no trailing slash).
-  // Looks like:  https://voice-room.YOURNAME.workers.dev
-  WORKER_URL: "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev",
-
-  // From Part 1 — your LiveKit project URL.
-  // Looks like:  wss://your-project-abc123.livekit.cloud
-  LIVEKIT_URL: "wss://YOUR-PROJECT.livekit.cloud",
+  WORKER_URL: "https://artemswebgameworker.bokhrenkovr.workers.dev",
+  LIVEKIT_URL: "wss://artemswebgame-ndmnp9un.livekit.cloud",
 };
+
