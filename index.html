@@ -526,34 +526,47 @@
     const SPD = 300, G = 2000, JUMP = 760;
     let lastTs = 0, acc = 0, raf = 0;
     let lastSend = 0, lastSentX = -1, lastSentY = -1;
+    let lastHb = 0; // heartbeat: proves we're alive even when standing still
     const canvas = el.gameCanvas;
     const ctx = canvas.getContext("2d");
 
-    // Deterministic background trees — same on every client, pure decor.
-    // Two parallax layers so scrolling is clearly visible. Trees are spread
-    // across each layer's *compressed* visible range, so some are always
-    // on screen no matter where you stand.
-    const trees = (() => {
-      let s = 1337;
+    // The ground is a grid of dirt/grass blocks. It's static, so it's
+    // pre-rendered once onto an offscreen canvas and stamped each frame.
+    let groundCanvas = null;
+    function buildGround() {
+      const t = world.block;
+      const cols = Math.ceil(world.w / t);
+      const rows = Math.ceil((world.h - world.floorTop) / t);
+      const c = document.createElement("canvas");
+      c.width = world.w; c.height = rows * t;
+      const g2 = c.getContext("2d");
+      let s = 7331; // deterministic shade jitter — identical on every client
       const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
-      const list = [];
-      const NOMINAL_VISW = 1300, WW = 4800;
-      const mk = (layer, n) => {
-        const span = (WW - NOMINAL_VISW) * layer + NOMINAL_VISW;
-        for (let i = 0; i < n; i++) {
-          list.push({
-            x: 60 + rnd() * (span - 120),
-            layer,                                // far / near tree line
-            w: 52 + rnd() * 60,                   // canopy size (square-ish)
-            h: 52 + rnd() * 44,
-            trunk: 14 + rnd() * 10,
-            th: 30 + rnd() * 30,
-          });
+      for (let r = 0; r < rows; r++) {
+        for (let col = 0; col < cols; col++) {
+          const x = col * t, y = r * t, j = rnd();
+          if (r === 0) {
+            // surface block: dirt body + grassy cap
+            g2.fillStyle = "hsl(24 34% " + (30 + j * 6) + "%)";
+            g2.fillRect(x, y, t, t);
+            g2.fillStyle = "hsl(130 30% " + (32 + j * 6) + "%)";
+            g2.fillRect(x, y, t, 12);
+            g2.fillStyle = "hsl(130 34% " + (40 + j * 6) + "%)";
+            g2.fillRect(x, y, t, 4);
+          } else if (r === rows - 1) {
+            g2.fillStyle = "hsl(228 20% " + (26 + j * 5) + "%)"; // stony bottom row
+            g2.fillRect(x, y, t, t);
+          } else {
+            g2.fillStyle = "hsl(24 30% " + (26 + j * 6) + "%)";   // dirt
+            g2.fillRect(x, y, t, t);
+          }
+          g2.strokeStyle = "rgba(0,0,0,.3)"; // the tile outline that reads as "blocks"
+          g2.lineWidth = 2;
+          g2.strokeRect(x + 1, y + 1, t - 2, t - 2);
         }
-      };
-      mk(0.45, 12); mk(0.62, 12);
-      return list;
-    })();
+      }
+      groundCanvas = c;
+    }
 
     function start(workerUrl, roomName, name, identity) {
       myId = identity; myName = name;
@@ -590,6 +603,7 @@
         if (m.t === "init") {
           world = m.world || world;
           hasWorld = true;
+          groundCanvas = null; // rebuild tiles for the real world
           remotes.clear();
           for (const pid of Object.keys(m.players || {})) {
             if (pid === myId) continue;
@@ -647,6 +661,13 @@
           lastSentX = rx; lastSentY = ry; lastSend = now;
         }
       }
+
+      // heartbeat every 5 s — the server reaps anyone silent for 30 s+,
+      // and a frozen/locked tab stops beating on its own
+      if (ws && ws.readyState === 1 && now - lastHb > 5000) {
+        ws.send(JSON.stringify({ t: "hb" }));
+        lastHb = now;
+      }
     }
 
     // ── render ──
@@ -697,34 +718,12 @@
       ctx.beginPath(); ctx.arc(4200, 130, 52, 0, 7); ctx.fill();
       ctx.restore();
 
-      // background trees (two parallax layers)
-      for (const t of trees) {
-        ctx.save();
-        ctx.translate(-camX * t.layer, 0);
-        ctx.fillStyle = t.layer < 0.5 ? "#3d3349" : "#4a3b2e";          // trunk
-        ctx.fillRect(t.x - t.trunk / 2, world.floorTop - t.th, t.trunk, t.th);
-        ctx.fillStyle = t.layer < 0.5 ? "#26466a" : "#2f5d3f";          // canopy
-        ctx.fillRect(t.x - t.w / 2, world.floorTop - t.th - t.h, t.w, t.h);
-        ctx.fillStyle = t.layer < 0.5 ? "#2f5480" : "#3a7350";          // canopy top light
-        ctx.fillRect(t.x - t.w / 2, world.floorTop - t.th - t.h, t.w, 8);
-        ctx.restore();
-      }
-
-      // main layer: floor + players
+      // main layer: ground blocks + players
       ctx.save();
       ctx.translate(-camX, 0);
 
-      ctx.fillStyle = "#2b3a5e";
-      ctx.fillRect(0, world.floorTop, world.w, world.h - world.floorTop);
-      ctx.fillStyle = "#3d5283";
-      ctx.fillRect(0, world.floorTop, world.w, 8);
-      ctx.strokeStyle = "rgba(0,0,0,.16)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let x = 80; x < world.w; x += 80) {
-        ctx.moveTo(x, world.floorTop + 8); ctx.lineTo(x, world.h);
-      }
-      ctx.stroke();
+      if (!groundCanvas) buildGround();
+      ctx.drawImage(groundCanvas, 0, world.floorTop);
       // world edges
       ctx.fillStyle = "rgba(255,255,255,.14)";
       ctx.fillRect(0, world.floorTop - 60, 4, 60);
@@ -804,6 +803,8 @@
       document.addEventListener("contextmenu", (e) => {
         if (e.target && e.target.classList && e.target.classList.contains("pad-btn")) e.preventDefault();
       });
+      // clean close when the page is backgrounded/killed → no ghost left behind
+      window.addEventListener("pagehide", () => { try { if (ws) ws.close(); } catch (_) {} });
     }
     function bindPad(btn, key) {
       const on = (e) => {

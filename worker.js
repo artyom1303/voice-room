@@ -27,6 +27,12 @@ const CORS_HEADERS = {
 
 const ROOM_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
+// Ghost reaping: clients send a heartbeat every 5 s; the room sweeps
+// every SWEEP_MS and removes anyone silent for more than STALE_MS
+// (killed browsers and locked phones never send a close frame).
+const SWEEP_MS = 20000;
+const STALE_MS = 30000;
+
 // World constants — single source of truth. The Durable Object sends
 // this to every client in the "init" message, so the world is identical
 // for everyone (and matches the proximity-voice range: hear = 20 blocks).
@@ -177,7 +183,8 @@ export class GameRoom {
         this.saved = {};
       }
       // Rebuild after waking from hibernation: sockets are still open,
-      // reload their players from storage.
+      // reload their players from storage. lastSeen resets — an open
+      // socket is proof of life.
       for (const ws of ctx.getWebSockets()) {
         const a = safeAttachment(ws);
         if (a && a.id) {
@@ -185,6 +192,7 @@ export class GameRoom {
           this.players.set(a.id, {
             name: a.name,
             cid: a.cid,
+            lastSeen: Date.now(),
             x: s ? s.x : spawnX(),
             y: s ? s.y : WORLD.floorTop - WORLD.block,
           });
@@ -215,7 +223,7 @@ export class GameRoom {
       x: s ? s.x : spawnX(),
       y: s ? s.y : WORLD.floorTop - WORLD.block,
     };
-    this.players.set(id, { name, cid, x: start.x, y: start.y });
+    this.players.set(id, { name, cid, lastSeen: Date.now(), x: start.x, y: start.y });
 
     const roster = {};
     for (const [pid, p] of this.players) roster[pid] = { name: p.name, x: p.x, y: p.y };
@@ -223,22 +231,51 @@ export class GameRoom {
     this.broadcast({ t: "+", id, name, x: start.x, y: start.y }, id);
     this.scheduleSave();
 
+    // Arm the liveness sweeper (an alarm wakes the room even if hibernated).
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + SWEEP_MS);
+    }
+
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
   async webSocketMessage(ws, raw) {
     const a = safeAttachment(ws);
     if (!a || !a.id) return;
+    const p = this.players.get(a.id);
+    if (!p || p.cid !== a.cid) return; // stale socket from an older session
+    p.lastSeen = Date.now(); // any message proves the client is alive
+
     let m;
     try { m = JSON.parse(raw); } catch (_) { return; }
+    if (m.t === "hb") return; // heartbeat: presence only, no relay
 
     if (m.t === "p" && Number.isFinite(m.x) && Number.isFinite(m.y)) {
-      const p = this.players.get(a.id);
-      if (!p || p.cid !== a.cid) return; // stale socket from an older session
       p.x = clamp(m.x, 0, WORLD.w - WORLD.block);
       p.y = clamp(m.y, -4000, 4000);
       this.broadcast({ t: "p", id: a.id, x: Math.round(p.x), y: Math.round(p.y) }, a.id);
       this.scheduleSave();
+    }
+  }
+
+  // Liveness sweeper. Runs every SWEEP_MS while anyone is connected;
+  // an alarm wakes the room even if it hibernated.
+  async alarm() {
+    const now = Date.now();
+    for (const [id, p] of [...this.players]) {
+      if (now - p.lastSeen > STALE_MS) {
+        this.saved[id] = { name: p.name, x: Math.round(p.x), y: Math.round(p.y) };
+        this.players.delete(id);
+        for (const ws of this.ctx.getWebSockets()) {
+          const a = safeAttachment(ws);
+          if (a && a.id === id) { try { ws.close(4000, "idle"); } catch (_) {} }
+        }
+        this.broadcast({ t: "-", id }, id);
+      }
+    }
+    this.scheduleSave();
+    if (this.players.size > 0) {
+      await this.ctx.storage.setAlarm(now + SWEEP_MS);
     }
   }
 
@@ -262,7 +299,7 @@ export class GameRoom {
     for (const ws of this.ctx.getWebSockets()) {
       const a = safeAttachment(ws);
       if (a && a.id && a.id !== exceptId) {
-        try { ws.send(s); } catch (_) {}
+        try { ws.send(s); } catch (_) { this.drop(ws); } // dead socket → remove ghost now
       }
     }
   }
