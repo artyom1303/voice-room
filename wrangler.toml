@@ -1,0 +1,27 @@
+# ═══════════════════════════════════════════════════════════════
+#  Voice Room — wrangler config
+#
+#  NOT needed for the normal dashboard paste-in deployment.
+#  Useful only if you ever deploy from the command line (Wrangler /
+#  Termux) or connect the repo in Cloudflare. This is the complete
+#  config for the current worker.js (tokens + game rooms).
+# ═══════════════════════════════════════════════════════════════
+
+#  IMPORTANT: "name" must match your existing Worker's name so the
+#  deploy updates it in place and keeps your current URL. Preset to
+#  match the Worker you created — change it if yours differs.
+name = "artemswebgameworker"
+main = "worker.js"
+compatibility_date = "2026-05-01"
+
+# Game rooms: one Durable Object per room name = one persistent,
+# authoritative world. If you deploy via dashboard instead, add this
+# binding there: Settings → Bindings → Durable Object →
+# name "ROOMS", class "GameRoom" (see Setup Guide, Part 5).
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "GameRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom"]
