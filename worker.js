@@ -37,7 +37,7 @@ const WORLD = {
   floorTop: 680,  // y of the floor surface
   hear: 800,      // proximity voice range = 20 player widths
   spawnMin: 200,  // random spawn x in [spawnMin, spawnMin+spawnSpan]
-  spawnSpan: 1100,
+  spawnSpan: 500, // < hear range, so everyone always spawns within earshot
 };
 
 export default {
