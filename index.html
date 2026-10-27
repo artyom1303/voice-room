@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f1d">
+<title>Voice Room</title>
+<style>
+  :root {
+    --bg: #0b0f1d; --card: #141a2e; --card2: #1a2138;
+    --border: rgba(255,255,255,.08); --text: #e9edfb; --muted: #97a1c4;
+    --accent: #6c8cff; --accent2: #8f6cff;
+    --good: #35d99a; --warn: #ffcf5c; --bad: #ff6b6b;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background:
+      radial-gradient(1200px 800px at 80% -10%, #1d2a55 0%, transparent 55%),
+      radial-gradient(900px 700px at -10% 110%, #2a1d55 0%, transparent 50%),
+      var(--bg);
+    color: var(--text); min-height: 100dvh; display: flex; justify-content: center;
+  }
+  .screen { width: 100%; max-width: 480px; padding: 20px 18px 42px;
+    display: flex; flex-direction: column; gap: 16px; }
+  .hidden { display: none !important; }
+
+  .brand { text-align: center; padding: 26px 0 4px; }
+  .brand h1 { font-size: 28px; letter-spacing: .5px; }
+  .brand h1 span { background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand p { color: var(--muted); font-size: 13.5px; margin-top: 6px; }
+
+  .card { background: linear-gradient(180deg, var(--card), var(--card2));
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+  .card h2 { font-size: 12.5px; margin-bottom: 14px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1.2px; }
+
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+  label:last-child { margin-bottom: 0; }
+  input { width: 100%; margin-top: 7px; padding: 13px 14px; border-radius: 12px;
+    border: 1px solid var(--border); background: #0d1226; color: var(--text);
+    font-size: 16px; outline: none; transition: border-color .15s, box-shadow .15s; }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(108,140,255,.18); }
+
+  button { font: inherit; color: inherit; border: none; cursor: pointer;
+    border-radius: 12px; transition: transform .06s, opacity .15s; }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { width: 100%; padding: 15px; font-size: 16px; font-weight: 650;
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
+  .btn-ghost { padding: 11px 14px; background: rgba(255,255,255,.06);
+    border: 1px solid var(--border); font-size: 14px; }
+  .btn-danger { padding: 11px 14px; background: rgba(255,107,107,.13);
+    border: 1px solid rgba(255,107,107,.35); color: #ffb3b3; font-size: 14px; }
+
+  .banner { background: rgba(255,207,92,.1); border: 1px solid rgba(255,207,92,.4);
+    color: #ffe1a1; border-radius: var(--radius); padding: 14px 16px;
+    font-size: 13.5px; line-height: 1.55; }
+  .banner code { background: rgba(0,0,0,.3); padding: 1px 6px; border-radius: 6px; }
+
+  .status { min-height: 18px; font-size: 13.5px; text-align: center; color: var(--muted); }
+  .status.err { color: var(--bad); }
+  .status.ok { color: var(--good); }
+
+  /* level meter — fill is clipped, so gradient stops stay put at any level */
+  .meter { height: 10px; background: #0d1226; border-radius: 99px;
+    overflow: hidden; border: 1px solid var(--border); }
+  .meter .fill { height: 100%; width: 100%;
+    background: linear-gradient(90deg, var(--good) 0%, var(--good) 55%, var(--warn) 78%, var(--bad) 100%);
+    clip-path: inset(0 100% 0 0); }
+  .mic-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .mic-row .meter { flex: 1; }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 10px; min-height: 17px; }
+  .hint.ok { color: var(--good); }
+  .hint.warn { color: var(--warn); }
+
+  /* room screen */
+  .room-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .room-head h1 { font-size: 22px; word-break: break-all; }
+  .room-head .sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .head-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px; }
+  .person { background: linear-gradient(180deg, var(--card), var(--card2));
+    border: 1px solid var(--border); border-radius: 14px; padding: 16px 8px 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 9px; position: relative; }
+  .avatar { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center;
+    font-weight: 700; font-size: 21px; color: #0b0f1d; position: relative; }
+  .person.speaking .avatar::after { content: ""; position: absolute; inset: -5px;
+    border-radius: 50%; border: 2.5px solid var(--good); animation: pulse 1.2s ease-out infinite; }
+  @keyframes pulse { 0% { opacity: 1; transform: scale(.92); } 100% { opacity: 0; transform: scale(1.28); } }
+  .person .name { font-size: 13px; max-width: 100%; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .person .you { color: var(--muted); font-size: 11px; }
+  .mic-badge { position: absolute; top: 7px; right: 7px; width: 22px; height: 22px;
+    border-radius: 50%; background: rgba(255,107,107,.16); border: 1px solid rgba(255,107,107,.45);
+    color: #ff9d9d; display: grid; place-items: center; }
+
+  .controls { position: sticky; bottom: 16px; margin-top: auto;
+    background: rgba(20,26,46,.88); backdrop-filter: blur(12px);
+    border: 1px solid var(--border); border-radius: 99px; padding: 10px 12px;
+    display: flex; align-items: center; gap: 12px; }
+  .btn-round { width: 50px; height: 50px; border-radius: 50%; flex-shrink: 0;
+    display: grid; place-items: center; background: rgba(255,255,255,.08);
+    border: 1px solid var(--border); }
+  .btn-round.muted { background: rgba(255,107,107,.2); border-color: rgba(255,107,107,.5); color: #ffb3b3; }
+  .controls .meter { flex: 1; }
+  .btn-leave-sm { padding: 10px 16px; border-radius: 99px; background: rgba(255,107,107,.15);
+    border: 1px solid rgba(255,107,107,.4); color: #ffb3b3; font-size: 14px; flex-shrink: 0; }
+
+  #audio-out { display: none; }
+</style>
+</head>
+<body>
+
+  <!-- ═══════════════ SCREEN 1 · join + mic test ═══════════════ -->
+  <main id="screen-join" class="screen">
+    <div class="brand">
+      <h1>Voice<span>Room</span></h1>
+      <p>Same room name = same room. Share the link, talk.</p>
+    </div>
+
+    <div id="setup-banner" class="banner hidden">
+      <b>Setup not finished.</b> This copy of the app still has placeholder
+      server addresses. Open <code>config.js</code> in your GitHub repo and fill in
+      <code>WORKER_URL</code> and <code>LIVEKIT_URL</code> (Setup Guide, Part 3).
+      The mic test below works either way.
+    </div>
+
+    <section class="card">
+      <h2>Join a room</h2>
+      <label>Room name
+        <input id="in-room" type="text" placeholder="e.g. squad" autocomplete="off"
+               autocapitalize="none" spellcheck="false" maxlength="32">
+      </label>
+      <label>Your name
+        <input id="in-name" type="text" placeholder="e.g. Alex" maxlength="32">
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Mic test</h2>
+      <button id="btn-test" class="btn-ghost" style="width:100%">Start mic test</button>
+      <div class="mic-row"><div class="meter"><div class="fill" id="mic-fill"></div></div></div>
+      <p class="hint" id="mic-hint">Check your mic before joining.</p>
+    </section>
+
+    <button id="btn-join" class="btn-primary">Join room</button>
+    <p id="join-status" class="status"></p>
+  </main>
+
+  <!-- ═══════════════ SCREEN 2 · in room ═══════════════ -->
+  <main id="screen-room" class="screen hidden">
+    <div class="room-head">
+      <div>
+        <h1 id="room-name">room</h1>
+        <div class="sub" id="room-count"></div>
+      </div>
+      <div class="head-actions">
+        <button id="btn-copy" class="btn-ghost">Copy invite link</button>
+      </div>
+    </div>
+
+    <p id="room-status" class="status"></p>
+    <section id="participants" class="grid"></section>
+
+    <footer class="controls">
+      <button id="btn-mute" class="btn-round" aria-label="Mute"></button>
+      <div class="meter"><div class="fill" id="local-fill"></div></div>
+      <button id="btn-leave" class="btn-leave-sm">Leave</button>
+    </footer>
+  </main>
+
+  <!-- remote audio elements live here (never visible) -->
+  <div id="audio-out"></div>
+
+  <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.js"></script>
+  <script>
+  "use strict";
+  /* ═══════════════════════════════════════════════════════════════
+     VoiceRoom app logic
+       1. config & helpers     4. mic test
+       2. state                5. LiveKit room (voice)
+       3. level meter          6. UI rendering + wiring
+       7. FUTURE: game sync plugs in here (persistent world)
+     ═══════════════════════════════════════════════════════════════ */
+
+  // ── 1. config & helpers ────────────────────────────────────────
+  const CFG = window.APP_CONFIG || {};
+  const LK = window.LivekitClient;
+  const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+  const $ = (id) => document.getElementById(id);
+
+  const el = {
+    joinScreen: $("screen-join"), roomScreen: $("screen-room"), banner: $("setup-banner"),
+    inRoom: $("in-room"), inName: $("in-name"),
+    btnTest: $("btn-test"), micFill: $("mic-fill"), micHint: $("mic-hint"),
+    btnJoin: $("btn-join"), joinStatus: $("join-status"),
+    roomName: $("room-name"), roomCount: $("room-count"), btnCopy: $("btn-copy"),
+    grid: $("participants"), roomStatus: $("room-status"),
+    btnMute: $("btn-mute"), btnLeave: $("btn-leave"), localFill: $("local-fill"),
+    audioOut: $("audio-out"),
+  };
+
+  const ICON_MIC_ON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
+  const ICON_MIC_OFF = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
+  const ICON_MIC_OFF_SM = ICON_MIC_OFF.replace('width="24" height="24"', 'width="12" height="12"');
+
+  function setStatus(target, msg, kind) {
+    target.textContent = msg || "";
+    target.className = "status" + (kind ? " " + kind : "");
+  }
+  function sanitizeRoom(v) { return v.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32); }
+  function isConfigured() {
+    return CFG.WORKER_URL && CFG.LIVEKIT_URL &&
+      !CFG.WORKER_URL.includes("YOUR-") && !CFG.LIVEKIT_URL.includes("YOUR-");
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  function hueFor(str) { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+
+  window.addEventListener("error", (e) => {
+    const inRoom = !el.roomScreen.classList.contains("hidden");
+    setStatus(inRoom ? el.roomStatus : el.joinStatus, "Error: " + e.message, "err");
+  });
+
+  // ── 2. state ───────────────────────────────────────────────────
+  let room = null;             // LiveKit Room while connected
+  let localAudioTrack = null;  // published LiveKit mic track
+  let testStream = null;       // mic-test stream (pre-join only)
+  let muted = false;
+  const speaking = new Set();  // identities of current active speakers
+
+  // ── 3. level meter (mic test AND in-room indicator) ────────────
+  let audioCtx = null, analyser = null, meterRaf = 0, meter = null;
+
+  function startMeter(mediaStream, fillEl, hintEl) {
+    stopMeter();
+    if (!audioCtx || audioCtx.state === "closed") {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const src = audioCtx.createMediaStreamSource(mediaStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    src.connect(analyser);
+    meter = { fillEl, hintEl, smooth: 0, start: Date.now(), heard: false, lastHint: "" };
+    const data = new Uint8Array(analyser.fftSize);
+
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128; sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      const level = Math.min(1, rms * 3.2);              // boost into visual range
+      meter.smooth = Math.max(level, meter.smooth * 0.82); // fast attack, soft decay
+      meter.fillEl.style.clipPath = "inset(0 " + ((1 - meter.smooth) * 100) + "% 0 0)";
+
+      if (meter.hintEl) {
+        let txt = "Speak — the bar should move.", cls = "hint";
+        if (meter.smooth > 0.06) meter.heard = true;
+        if (meter.heard) { txt = "Sounds good — your mic works."; cls = "hint ok"; }
+        else if (Date.now() - meter.start > 4000) {
+          txt = "Very quiet… speak, or check that the right mic is allowed."; cls = "hint warn";
+        }
+        if (txt !== meter.lastHint) {
+          meter.hintEl.textContent = txt; meter.hintEl.className = cls; meter.lastHint = txt;
+        }
+      }
+      meterRaf = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+  function stopMeter() {
+    if (meterRaf) cancelAnimationFrame(meterRaf);
+    meterRaf = 0; meter = null;
+  }
+  function stopTestStream() {
+    if (testStream) { testStream.getTracks().forEach((t) => t.stop()); testStream = null; }
+  }
+  function resetMicTestUI() {
+    el.btnTest.textContent = "Start mic test";
+    el.micHint.textContent = "Check your mic before joining.";
+    el.micHint.className = "hint";
+    el.micFill.style.clipPath = "inset(0 100% 0 0)";
+  }
+
+  // ── 4. mic test ────────────────────────────────────────────────
+  async function onTestMic() {
+    setStatus(el.joinStatus, "");
+    el.btnTest.disabled = true;
+    try {
+      testStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      startMeter(testStream, el.micFill, el.micHint);
+      el.btnTest.textContent = "Mic is live — speak";
+    } catch (err) {
+      setStatus(el.joinStatus, micErrorText(err), "err");
+    } finally {
+      el.btnTest.disabled = false;
+    }
+  }
+  function micErrorText(err) {
+    const n = err && err.name;
+    if (n === "NotAllowedError" || n === "SecurityError")
+      return "Microphone blocked — allow mic access for this site in your browser, then retry.";
+    if (n === "NotFoundError" || n === "OverconstrainedError") return "No microphone found on this device.";
+    return "Could not access the microphone: " + ((err && err.message) || err);
+  }
+
+  // ── 5. LiveKit room (voice) ────────────────────────────────────
+  async function onJoin() {
+    const roomName = sanitizeRoom(el.inRoom.value);
+    const name = el.inName.value.trim().slice(0, 32);
+
+    if (!ROOM_RE.test(roomName))
+      return setStatus(el.joinStatus, "Room name: 1–32 chars of a–z, 0–9, - or _", "err");
+    if (!name) return setStatus(el.joinStatus, "Please enter your name.", "err");
+    if (!isConfigured())
+      return setStatus(el.joinStatus, "Setup not finished — see the yellow banner above.", "err");
+    if (!LK)
+      return setStatus(el.joinStatus, "Voice SDK failed to load. Check your connection and reload.", "err");
+
+    el.btnJoin.disabled = true;
+    try {
+      setStatus(el.joinStatus, "Getting access token…");
+      const res = await fetch(CFG.WORKER_URL + "/token?room=" + encodeURIComponent(roomName) +
+                              "&name=" + encodeURIComponent(name));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Token server error (" + res.status + ")");
+
+      setStatus(el.joinStatus, "Connecting…");
+      stopMeter(); stopTestStream();  // release test mic; LiveKit re-acquires it cleanly
+
+      room = new LK.Room({ adaptiveStream: true, dynacast: true });
+      wireRoomEvents(room);
+      await room.connect(CFG.LIVEKIT_URL, data.token);
+
+      localAudioTrack = await LK.createLocalAudioTrack({
+        echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+      });
+      await room.localParticipant.publishTrack(localAudioTrack);
+      await room.startAudio();        // lift autoplay block (we're inside a click)
+
+      enterRoomUI(roomName);
+    } catch (err) {
+      if (room) { try { room.disconnect(); } catch (_) {} room = null; }
+      resetMicTestUI();
+      setStatus(el.joinStatus, err.message || String(err), "err");
+    } finally {
+      el.btnJoin.disabled = false;
+    }
+  }
+
+  function wireRoomEvents(r) {
+    r.on(LK.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+      if (track.kind === LK.Track.Kind.Audio) {
+        const a = track.attach();
+        a.dataset.identity = participant.identity;
+        el.audioOut.appendChild(a);
+      }
+    });
+    r.on(LK.RoomEvent.TrackUnsubscribed, (track) => {
+      track.detach().forEach((n) => n.remove());
+    });
+    r.on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
+      speaking.clear();
+      speakers.forEach((p) => speaking.add(p.identity));
+      renderParticipants();
+    });
+    [LK.RoomEvent.ParticipantConnected, LK.RoomEvent.ParticipantDisconnected,
+     LK.RoomEvent.TrackMuted, LK.RoomEvent.TrackUnmuted,
+     LK.RoomEvent.LocalTrackPublished].forEach((evt) => r.on(evt, renderParticipants));
+
+    r.on(LK.RoomEvent.Reconnecting, () => setStatus(el.roomStatus, "Connection lost — reconnecting…", "err"));
+    r.on(LK.RoomEvent.Reconnected, () => setStatus(el.roomStatus, "Reconnected.", "ok"));
+    r.on(LK.RoomEvent.MediaDevicesError, (e) => setStatus(el.roomStatus, "Mic error: " + e.message, "err"));
+    r.on(LK.RoomEvent.Disconnected, () => {
+      if (room === r) {               // unexpected drop (manual leave sets room = null first)
+        room = null;
+        exitRoomUI();
+        setStatus(el.joinStatus, "Disconnected from the room.", "err");
+      }
+    });
+  }
+
+  async function onToggleMute() {
+    if (!room) return;
+    muted = !muted;
+    try {
+      await room.localParticipant.setMicrophoneEnabled(!muted);
+    } catch (e) {
+      muted = !muted;
+      setStatus(el.roomStatus, "Mute failed: " + e.message, "err");
+    }
+    updateMuteBtn();
+    renderParticipants();
+  }
+  function updateMuteBtn() {
+    el.btnMute.classList.toggle("muted", muted);
+    el.btnMute.innerHTML = muted ? ICON_MIC_OFF : ICON_MIC_ON;
+    el.btnMute.setAttribute("aria-label", muted ? "Unmute microphone" : "Mute microphone");
+  }
+
+  async function onLeave() {
+    const r = room; room = null;
+    if (r) { try { await r.disconnect(); } catch (_) {} }
+    exitRoomUI();
+    setStatus(el.joinStatus, "");
+  }
+
+  async function onCopy() {
+    const url = location.origin + location.pathname + "?room=" + encodeURIComponent(el.roomName.textContent);
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (_) {
+      const t = document.createElement("textarea");
+      t.value = url; document.body.appendChild(t); t.select();
+      document.execCommand("copy"); t.remove();
+    }
+    setStatus(el.roomStatus, "Invite link copied — send it to your friends.", "ok");
+  }
+
+  // ── 6. UI rendering + wiring ───────────────────────────────────
+  function enterRoomUI(roomName) {
+    el.roomName.textContent = roomName;
+    el.joinScreen.classList.add("hidden");
+    el.roomScreen.classList.remove("hidden");
+    muted = false; updateMuteBtn();
+    setStatus(el.roomStatus, "Connected.", "ok");
+    startMeter(new MediaStream([localAudioTrack.mediaStreamTrack]), el.localFill, null);
+    renderParticipants();
+  }
+
+  function exitRoomUI() {
+    stopMeter();
+    if (audioCtx && audioCtx.state !== "closed") audioCtx.close().catch(() => {});
+    audioCtx = null;
+    el.audioOut.innerHTML = "";
+    if (localAudioTrack) { try { localAudioTrack.stop(); } catch (_) {} localAudioTrack = null; }
+    stopTestStream();
+    el.roomScreen.classList.add("hidden");
+    el.joinScreen.classList.remove("hidden");
+    resetMicTestUI();
+  }
+
+  function renderParticipants() {
+    if (!room) return;
+    const people = [room.localParticipant, ...room.remoteParticipants.values()];
+    el.roomCount.textContent = people.length + (people.length === 1 ? " person" : " people") + " in room";
+    el.grid.innerHTML = "";
+    for (const p of people) {
+      const isLocal = p === room.localParticipant;
+      const name = p.name || p.identity || "?";
+      const micOn = isLocal ? !muted : p.isMicrophoneEnabled;
+      const tile = document.createElement("div");
+      tile.className = "person" + (speaking.has(p.identity) && micOn ? " speaking" : "");
+      tile.innerHTML =
+        '<div class="avatar" style="background:hsl(' + hueFor(name) + ' 72% 68%)">' +
+          escapeHtml((name[0] || "?").toUpperCase()) +
+        "</div>" +
+        (micOn ? "" : '<span class="mic-badge">' + ICON_MIC_OFF_SM + "</span>") +
+        '<div class="name">' + escapeHtml(name) + (isLocal ? ' <span class="you">(you)</span>' : "") + "</div>";
+      el.grid.appendChild(tile);
+    }
+  }
+
+  function init() {
+    const q = new URLSearchParams(location.search);
+    if (q.get("room")) el.inRoom.value = sanitizeRoom(q.get("room"));   // invite link prefill
+    const saved = localStorage.getItem("vr-name");
+    if (saved) el.inName.value = saved;
+
+    el.inRoom.addEventListener("input", () => { el.inRoom.value = sanitizeRoom(el.inRoom.value); });
+    el.btnTest.addEventListener("click", onTestMic);
+    el.btnJoin.addEventListener("click", () => {
+      localStorage.setItem("vr-name", el.inName.value.trim().slice(0, 32));
+      onJoin();
+    });
+    [el.inRoom, el.inName].forEach((inp) =>
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") el.btnJoin.click(); }));
+    el.btnCopy.addEventListener("click", onCopy);
+    el.btnMute.addEventListener("click", onToggleMute);
+    el.btnLeave.addEventListener("click", onLeave);
+    updateMuteBtn();
+
+    if (!isConfigured()) el.banner.classList.remove("hidden");
+    if (!LK) setStatus(el.joinStatus, "Voice SDK failed to load — check your connection and reload.", "err");
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     7. FUTURE — game sync (persistent Terraria-like world)
+     Voice stays in this file. The game will be a separate module that:
+       • opens a WebSocket to  CFG.WORKER_URL + "/ws?room=" + roomName
+       • the Worker's Durable Object (binding ROOMS, idFromName(room))
+         is the authoritative world — it saves when everyone leaves and
+         restores on re-entry, so nobody is ever "host"
+       • voice (above) and game data (there) share only the room name
+     ═══════════════════════════════════════════════════════════════ */
+
+  init();
+  </script>
+</body>
+</html>
