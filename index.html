@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b0f1d">
 <title>Voice Room</title>
 <style>
@@ -14,6 +14,21 @@
     --radius: 16px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* ── kill default browser gestures/haptics (app-like feel) ── */
+  html, body { overscroll-behavior: none; }              /* pull-to-refresh + swipe back/forward */
+  * {
+    -webkit-tap-highlight-color: transparent;            /* gray tap flash */
+    -webkit-touch-callout: none;                         /* iOS long-press callout */
+    user-select: none; -webkit-user-select: none;        /* text selection / magnifier */
+  }
+  input, textarea {
+    user-select: text; -webkit-user-select: text;        /* join form must stay editable/pasteable */
+    -webkit-touch-callout: default;
+  }
+  a, img, button { -webkit-user-drag: none; }            /* drag ghost */
+  button, .btn-primary, .btn-ghost, .btn-danger, .pad-btn, .btn-round {
+    touch-action: manipulation;                          /* instant taps, no double-tap zoom */
+  }
   body {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     background:
@@ -87,7 +102,18 @@
   .hud-actions { display: flex; gap: 8px; flex-shrink: 0; }
   .hud-status { position: fixed; top: 76px; left: 0; right: 0; z-index: 5;
     pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.7); }
-  .hud-bottom { bottom: 0; padding: 14px; justify-content: space-between; align-items: flex-end; }
+  .hud-bottom { bottom: 0; padding: 12px 14px 14px; flex-direction: column; gap: 10px; align-items: stretch; }
+  .hud-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; pointer-events: none; }
+  .hud-row > * { pointer-events: auto; }
+  .pill { display: flex; align-items: center; gap: 8px; background: rgba(20,26,46,.66);
+    border: 1px solid var(--border); backdrop-filter: blur(8px); border-radius: 99px; padding: 7px 10px; }
+  .pill-btn { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,.08);
+    border: 1px solid var(--border); color: var(--text); font-size: 18px; line-height: 1;
+    display: grid; place-items: center; padding: 0; }
+  .slot { width: 34px; height: 34px; border-radius: 9px; border: 2px solid rgba(255,255,255,.18);
+    padding: 0; flex-shrink: 0; }
+  .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
+  @media (pointer: fine) { #btn-mode { display: none; } }
   .pad { display: flex; gap: 10px; }
   .pad-btn { width: 64px; height: 64px; border-radius: 50%; background: rgba(20,26,46,.66);
     border: 1px solid var(--border); backdrop-filter: blur(8px); font-size: 20px;
@@ -114,7 +140,7 @@
   <main id="screen-join" class="screen">
     <div class="brand">
       <h1>Voice<span>Room</span></h1>
-      <p>Same room name = same world. Walk together, talk — voices fade with distance.</p>
+      <p>Same room name = same world. Walk, dig, build, talk — voices fade with distance.</p>
     </div>
 
     <div id="setup-banner" class="banner hidden">
@@ -162,19 +188,33 @@
     </div>
 
     <p id="room-status" class="status hud-status"></p>
-    <div class="keys-hint">A / D or ← → to move · Space to jump · voices fade with distance</div>
+    <div class="keys-hint">A/D move · Space jump · LMB dig · RMB place · 1–3 block · +/− zoom</div>
 
     <div class="hud hud-bottom">
-      <div class="pad">
-        <button id="btn-left" class="pad-btn" aria-label="Move left">◀</button>
-        <button id="btn-right" class="pad-btn" aria-label="Move right">▶</button>
+      <div class="hud-row">
+        <div class="pill">
+          <button id="btn-zoom-out" class="pill-btn" aria-label="Zoom out">−</button>
+          <button id="btn-zoom-in" class="pill-btn" aria-label="Zoom in">+</button>
+        </div>
+        <div class="pill">
+          <button id="btn-mode" class="pill-btn" aria-label="Dig mode">⛏</button>
+          <button class="slot sel" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"></button>
+          <button class="slot" data-tile="3" style="background:#57617e" aria-label="Place stone"></button>
+          <button class="slot" data-tile="5" style="background:#8a6238" aria-label="Place wood"></button>
+        </div>
       </div>
-      <div class="mid-pill">
-        <button id="btn-mute" class="btn-round" aria-label="Mute"></button>
-        <div class="meter"><div class="fill" id="local-fill"></div></div>
-      </div>
-      <div class="pad">
-        <button id="btn-jump" class="pad-btn jump" aria-label="Jump">JUMP</button>
+      <div class="hud-row">
+        <div class="pad">
+          <button id="btn-left" class="pad-btn" aria-label="Move left">◀</button>
+          <button id="btn-right" class="pad-btn" aria-label="Move right">▶</button>
+        </div>
+        <div class="mid-pill">
+          <button id="btn-mute" class="btn-round" aria-label="Mute"></button>
+          <div class="meter"><div class="fill" id="local-fill"></div></div>
+        </div>
+        <div class="pad">
+          <button id="btn-jump" class="pad-btn jump" aria-label="Jump">JUMP</button>
+        </div>
       </div>
     </div>
   </main>
@@ -210,6 +250,7 @@
     btnMute: $("btn-mute"), btnLeave: $("btn-leave"), localFill: $("local-fill"),
     gameCanvas: $("game-canvas"), audioOut: $("audio-out"),
     btnLeft: $("btn-left"), btnRight: $("btn-right"), btnJump: $("btn-jump"),
+    btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"), btnMode: $("btn-mode"),
   };
 
   const ICON_MIC_ON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
@@ -496,85 +537,311 @@
     el.btnCopy.addEventListener("click", onCopy);
     el.btnMute.addEventListener("click", onToggleMute);
     el.btnLeave.addEventListener("click", onLeave);
+    el.btnZoomIn.addEventListener("click", Game.zoomIn);
+    el.btnZoomOut.addEventListener("click", Game.zoomOut);
+    el.btnMode.addEventListener("click", Game.toggleMode);
+    document.querySelectorAll(".slot").forEach((b) =>
+      b.addEventListener("click", () => Game.setPalette(+b.dataset.tile)));
     updateMuteBtn();
+
+    // ── kill default browser gestures/haptics everywhere ──
+    // Long-press context menu = the tap-and-hold vibration on Android.
+    // Text inputs keep theirs, so paste still works on the join form.
+    const inField = (e) => e.target && e.target.closest && e.target.closest("input, textarea");
+    document.addEventListener("contextmenu", (e) => { if (!inField(e)) e.preventDefault(); });
+    document.addEventListener("selectstart", (e) => { if (!inField(e)) e.preventDefault(); });
+    document.addEventListener("gesturestart", (e) => e.preventDefault()); // iOS pinch
+    document.addEventListener("dragstart", (e) => e.preventDefault());    // drag ghost
 
     if (!isConfigured()) el.banner.classList.remove("hidden");
     if (!LK) setStatus(el.joinStatus, "Voice SDK failed to load — check your connection and reload.", "err");
   }
 
   /* ═══════════════════════════════════════════════════════════════
-     7. GAME — persistent world + proximity voice
+     7. GAME — procedural block world + proximity voice
 
-     World state lives in the Durable Object (authoritative): it tracks
-     positions, relays them to everyone, and saves them so the world
-     survives everyone leaving. This client simulates only its own
-     block and interpolates everyone else's.
+     World: 10,000 × 2,000 tiles (1 tile = 1 m), generated
+     deterministically from the room's seed — identical on every
+     client, zero network traffic. Only dug/placed tiles ("mods")
+     come from the server. Rendering: visible chunks (32×32 tiles)
+     pre-rendered into offscreen canvases with an LRU cache; when
+     zoomed out far, a single low-res overview canvas is drawn.
 
-     Proximity voice: every frame, each remote player's GainNode is set
-     from horizontal distance — full volume at 0, silent at world.hear
-     (= 20 player widths). Walk away and voices fade out.
+     Mining: hold on a tile — it chips at the block's hardness rate;
+     release or wander out of reach and the damage heals back.
+     Desktop: LMB dig · RMB place · 1–3 pick block. Touch: mode toggle.
+
+     Proximity voice: volume = 1 − |Δx| / world.hear.
      ═══════════════════════════════════════════════════════════════ */
   const Game = (() => {
-    // Defaults — the server's "init" message replaces these.
-    let world = { w: 4800, h: 800, block: 40, floorTop: 680, hear: 800 };
+    // ── tiles & terrain (KEEP IN SYNC with worker.js) ──
+    const T = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, ORE: 4, WOOD: 5, BEDROCK: 6 };
+    const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1 }; // seconds to mine
+    const PW = 0.8, PH = 1.8;   // player box (m)
+    const CH = 32;              // chunk size (tiles)
+    const TEXPX = 16;           // chunk texture px per tile
+
+    let world = { w: 10000, h: 2000, hear: 16, reach: 5 };
+    let seed = 1;
+
+    function hash2(x, y, s) {
+      let h = ((x | 0) * 374761393 + (y | 0) * 668265263 + (s | 0) * 974711) | 0;
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      h ^= h >>> 16;
+      return (h >>> 0) / 4294967296;
+    }
+    function smooth(t) { return t * t * (3 - 2 * t); }
+    function vnoise1(x, s) {
+      const xi = Math.floor(x), xf = x - xi;
+      const a = hash2(xi, 0, s), b = hash2(xi + 1, 0, s);
+      return a + (b - a) * smooth(xf);
+    }
+    function fbm1(x, s, oct) {
+      let v = 0, amp = 1, f = 1, norm = 0;
+      for (let i = 0; i < oct; i++) { v += vnoise1(x * f, s + i * 101) * amp; norm += amp; amp *= 0.5; f *= 2; }
+      return v / norm;
+    }
+    function vnoise2(x, y, s) {
+      const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+      const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s);
+      const c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s);
+      const u = smooth(xf), v = smooth(yf);
+      return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+    }
+    function fbm2(x, y, s, oct) {
+      let v = 0, amp = 1, f = 1, norm = 0;
+      for (let i = 0; i < oct; i++) { v += vnoise2(x * f, y * f, s + i * 733) * amp; norm += amp; amp *= 0.5; f *= 2; }
+      return v / norm;
+    }
+    const hcache = new Map(); // memoized surface heights (world.w entries max)
+    function heightAt(x) {
+      let h = hcache.get(x);
+      if (h === undefined) {
+        const hills = fbm1(x / 140, seed, 3) - 0.5;
+        const broad = fbm1(x / 800, seed + 7, 2) - 0.5;
+        h = clamp(Math.floor(130 + hills * 76 + broad * 140), 40, world.h - 60);
+        hcache.set(x, h);
+      }
+      return h;
+    }
+    function tileAt(x, y) {
+      x |= 0; y |= 0;
+      if (y < 0) return T.AIR;
+      if (x < 0 || x >= world.w || y >= world.h) return T.BEDROCK;
+      if (y === world.h - 1) return T.BEDROCK; // unbreakable world floor
+      const h = heightAt(x);
+      if (y < h) return T.AIR;
+      const d = y - h;
+      if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T.AIR; // caves
+      if (d === 0) return T.GRASS;
+      if (d < 5) return T.DIRT;
+      if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T.ORE;
+      return T.STONE;
+    }
+
+    // ── state ──
     let active = false, hasWorld = false;
     let ws = null, wsUrl = "", myId = "", myName = "";
     let reconnectTimer = 0;
-    const me = { x: 300, y: 0, vy: 0, grounded: true };
+    const me = { x: 0, y: 0, vy: 0, grounded: false };
     const remotes = new Map(); // id -> { id, name, x, y, tx, ty }
     const input = { left: false, right: false, jump: false };
-    const SPD = 300, G = 2000, JUMP = 760;
+    const SPD = 6.5, G = 34, JUMP = 12.2; // m/s, m/s², m/s — jump ≈ 2.2 m
     let lastTs = 0, acc = 0, raf = 0;
     let lastSend = 0, lastSentX = -1, lastSentY = -1;
     let lastHb = 0; // heartbeat: proves we're alive even when standing still
     const canvas = el.gameCanvas;
     const ctx = canvas.getContext("2d");
 
-    // The ground is a grid of dirt/grass blocks. It's static, so it's
-    // pre-rendered once onto an offscreen canvas and stamped each frame.
-    let groundCanvas = null;
-    function buildGround() {
-      const t = world.block;
-      const cols = Math.ceil(world.w / t);
-      const rows = Math.ceil((world.h - world.floorTop) / t);
-      const c = document.createElement("canvas");
-      c.width = world.w; c.height = rows * t;
-      const g2 = c.getContext("2d");
-      let s = 7331; // deterministic shade jitter — identical on every client
-      const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
-      for (let r = 0; r < rows; r++) {
-        for (let col = 0; col < cols; col++) {
-          const x = col * t, y = r * t, j = rnd();
-          if (r === 0) {
-            // surface block: dirt body + grassy cap
-            g2.fillStyle = "hsl(24 34% " + (30 + j * 6) + "%)";
-            g2.fillRect(x, y, t, t);
-            g2.fillStyle = "hsl(130 30% " + (32 + j * 6) + "%)";
-            g2.fillRect(x, y, t, 12);
-            g2.fillStyle = "hsl(130 34% " + (40 + j * 6) + "%)";
-            g2.fillRect(x, y, t, 4);
-          } else if (r === rows - 1) {
-            g2.fillStyle = "hsl(228 20% " + (26 + j * 5) + "%)"; // stony bottom row
-            g2.fillRect(x, y, t, t);
-          } else {
-            g2.fillStyle = "hsl(24 30% " + (26 + j * 6) + "%)";   // dirt
-            g2.fillRect(x, y, t, t);
-          }
-          g2.strokeStyle = "rgba(0,0,0,.3)"; // the tile outline that reads as "blocks"
-          g2.lineWidth = 2;
-          g2.strokeRect(x + 1, y + 1, t - 2, t - 2);
-        }
-      }
-      groundCanvas = c;
+    // camera: pixels-per-meter, clamped between "fit whole world" and 72
+    let pxm = 48;
+    const fitScale = () => Math.min(window.innerWidth / world.w, window.innerHeight / world.h);
+    function zoomIn() { pxm = clamp(pxm * 1.5, fitScale(), 72); }
+    function zoomOut() { pxm = clamp(pxm / 1.5, fitScale(), 72); }
+
+    // tools
+    let mode = "dig";          // touch devices toggle; desktop uses LMB/RMB
+    let palette = T.DIRT;
+    function setPalette(v) {
+      palette = v;
+      document.querySelectorAll(".slot").forEach((b) =>
+        b.classList.toggle("sel", +b.dataset.tile === v));
+    }
+    function toggleMode() {
+      mode = mode === "dig" ? "place" : "dig";
+      el.btnMode.textContent = mode === "dig" ? "⛏" : "🧱";
+      el.btnMode.setAttribute("aria-label", mode === "dig" ? "Dig mode" : "Place mode");
     }
 
+    // ── overlay + chunk caches ──
+    const overlay = new Map();   // "x,y" -> tile (server mods + live edits)
+    const chunkData = new Map(); // "cx,cy" -> Uint8Array
+    const chunkTex = new Map();  // "cx,cy" -> canvas
+    const lru = [];              // chunk texture keys, most-recent last
+    const LRU_CAP = 40;
+
+    function getTile(x, y) {
+      const v = overlay.get((x | 0) + "," + (y | 0));
+      return v === undefined ? tileAt(x, y) : v;
+    }
+    const solid = (tx, ty) => getTile(tx, ty) !== T.AIR;
+
+    function getChunkData(cx, cy) {
+      const k = cx + "," + cy;
+      let d = chunkData.get(k);
+      if (!d) {
+        d = new Uint8Array(CH * CH);
+        const x0 = cx * CH, y0 = cy * CH;
+        for (let ly = 0; ly < CH; ly++)
+          for (let lx = 0; lx < CH; lx++)
+            d[ly * CH + lx] = getTile(x0 + lx, y0 + ly);
+        chunkData.set(k, d);
+      }
+      return d;
+    }
+
+    function paintTile(g2, lx, ly, v, wx, wy) {
+      const px = lx * TEXPX, py = ly * TEXPX;
+      g2.clearRect(px, py, TEXPX, TEXPX);
+      if (v === T.AIR) {
+        if (wy >= heightAt(wx)) { // underground: dark "wall" behind air
+          const j = hash2(wx, wy, 17);
+          g2.fillStyle = "hsl(228 26% " + (9 + j * 4) + "%)";
+          g2.fillRect(px, py, TEXPX, TEXPX);
+        }
+        return;
+      }
+      const j = hash2(wx, wy, 7);
+      if (v === T.GRASS) {
+        g2.fillStyle = "hsl(24 34% " + (30 + j * 6) + "%)"; g2.fillRect(px, py, TEXPX, TEXPX);
+        g2.fillStyle = "hsl(130 30% " + (32 + j * 6) + "%)"; g2.fillRect(px, py, TEXPX, 5);
+        g2.fillStyle = "hsl(130 34% " + (40 + j * 6) + "%)"; g2.fillRect(px, py, TEXPX, 2);
+      } else if (v === T.DIRT) {
+        g2.fillStyle = "hsl(24 30% " + (26 + j * 6) + "%)"; g2.fillRect(px, py, TEXPX, TEXPX);
+      } else if (v === T.STONE) {
+        g2.fillStyle = "hsl(224 16% " + (36 + j * 7) + "%)"; g2.fillRect(px, py, TEXPX, TEXPX);
+      } else if (v === T.ORE) {
+        g2.fillStyle = "hsl(224 16% " + (34 + j * 6) + "%)"; g2.fillRect(px, py, TEXPX, TEXPX);
+        g2.fillStyle = "hsl(33 78% " + (50 + j * 8) + "%)";
+        for (let i = 0; i < 3; i++) {
+          g2.fillRect(px + 2 + hash2(wx, wy, 31 + i) * (TEXPX - 6),
+                      py + 2 + hash2(wx, wy, 47 + i) * (TEXPX - 6), 3, 3);
+        }
+      } else if (v === T.WOOD) {
+        g2.fillStyle = "hsl(28 40% " + (34 + j * 6) + "%)"; g2.fillRect(px, py, TEXPX, TEXPX);
+        g2.fillStyle = "rgba(0,0,0,.22)";
+        g2.fillRect(px, py + 5, TEXPX, 1.5); g2.fillRect(px, py + 10, TEXPX, 1.5);
+      } else if (v === T.BEDROCK) {
+        g2.fillStyle = "hsl(230 20% " + (7 + j * 6) + "%)"; g2.fillRect(px, py, TEXPX, TEXPX);
+      }
+      g2.strokeStyle = "rgba(0,0,0,.3)";
+      g2.lineWidth = 1;
+      g2.strokeRect(px + 0.5, py + 0.5, TEXPX - 1, TEXPX - 1);
+    }
+
+    function touchLRU(k) {
+      const i = lru.indexOf(k);
+      if (i >= 0) lru.splice(i, 1);
+      lru.push(k);
+      if (lru.length > LRU_CAP) chunkTex.delete(lru.shift());
+    }
+    function chunkCanvasFor(cx, cy) {
+      const k = cx + "," + cy;
+      let c = chunkTex.get(k);
+      if (c) { touchLRU(k); return c; }
+      const data = getChunkData(cx, cy);
+      c = document.createElement("canvas");
+      c.width = CH * TEXPX; c.height = CH * TEXPX;
+      const g2 = c.getContext("2d");
+      const x0 = cx * CH, y0 = cy * CH;
+      for (let ly = 0; ly < CH; ly++)
+        for (let lx = 0; lx < CH; lx++)
+          paintTile(g2, lx, ly, data[ly * CH + lx], x0 + lx, y0 + ly);
+      chunkTex.set(k, c);
+      touchLRU(k);
+      return c;
+    }
+    function repaintTile(wx, wy, v) {
+      const cx = Math.floor(wx / CH), cy = Math.floor(wy / CH), k = cx + "," + cy;
+      const d = chunkData.get(k);
+      if (d) d[(wy - cy * CH) * CH + (wx - cx * CH)] = v;
+      const c = chunkTex.get(k);
+      if (c) paintTile(c.getContext("2d"), wx - cx * CH, wy - cy * CH, v, wx, wy);
+      patchOverview(wx, wy);
+    }
+    function setTileLocal(x, y, v) {
+      overlay.set(x + "," + y, v);
+      repaintTile(x, y, v);
+    }
+
+    // ── low-res overview for full zoom-out (1 px ≈ OVR meters) ──
+    // Uses a cave-free "macro" terrain so the map shows structure, not
+    // per-tile speckle; real dig/place edits are patched on top.
+    const OVR = 10;
+    const OVCOL = { 1: [77, 143, 93], 2: [107, 74, 48], 3: [87, 97, 126], 4: [176, 114, 46], 5: [138, 98, 56], 6: [5, 7, 12] };
+    let ovCanvas = null, ovCtx = null;
+    function macroTileAt(x, y) { // tileAt without caves/ore — map view only
+      x |= 0; y |= 0;
+      if (y < 0) return T.AIR;
+      if (x < 0 || x >= world.w || y >= world.h) return T.BEDROCK;
+      if (y === world.h - 1) return T.BEDROCK;
+      const h = heightAt(x);
+      if (y < h) return T.AIR;
+      const d = y - h;
+      if (d === 0) return T.GRASS;
+      if (d < 5) return T.DIRT;
+      return T.STONE;
+    }
+    function buildOverview() {
+      const w = Math.ceil(world.w / OVR), h = Math.ceil(world.h / OVR);
+      ovCanvas = document.createElement("canvas");
+      ovCanvas.width = w; ovCanvas.height = h;
+      ovCtx = ovCanvas.getContext("2d");
+      const img = ovCtx.createImageData(w, h);
+      const data = img.data;
+      for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+          const wx = px * OVR + (OVR >> 1), wy = py * OVR + (OVR >> 1);
+          const ov = overlay.get(wx + "," + wy);
+          const v = ov !== undefined ? ov : macroTileAt(wx, wy);
+          const i = (py * w + px) * 4;
+          if (v === T.AIR) {
+            if (wy >= heightAt(wx)) { data[i] = 16; data[i + 1] = 20; data[i + 2] = 32; data[i + 3] = 255; }
+          } else {
+            const c = OVCOL[v] || [255, 0, 255];
+            data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255;
+          }
+        }
+      }
+      ovCtx.putImageData(img, 0, 0);
+    }
+    function patchOverview(wx, wy) {
+      if (!ovCtx) return;
+      const px = Math.floor(wx / OVR), py = Math.floor(wy / OVR);
+      const v = getTile(px * OVR + (OVR >> 1), py * OVR + (OVR >> 1));
+      if (v === T.AIR && (py * OVR + (OVR >> 1)) < heightAt(px * OVR + (OVR >> 1))) {
+        ovCtx.clearRect(px, py, 1, 1);
+      } else if (v === T.AIR) {
+        ovCtx.fillStyle = "#101420"; ovCtx.fillRect(px, py, 1, 1);
+      } else {
+        const c = OVCOL[v] || [255, 0, 255];
+        ovCtx.fillStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+        ovCtx.fillRect(px, py, 1, 1);
+      }
+    }
+
+    // ── connection ──
     function start(workerUrl, roomName, name, identity) {
       myId = identity; myName = name;
       wsUrl = workerUrl.replace(/^http/, "ws") +
         "/ws?room=" + encodeURIComponent(roomName) +
         "&name=" + encodeURIComponent(name) +
         "&id=" + encodeURIComponent(identity);
-      active = true;
+      active = true; hasWorld = false;
+      overlay.clear(); chunkData.clear(); chunkTex.clear(); lru.length = 0;
+      hcache.clear(); ovCanvas = null; ovCtx = null;
+      pxm = 48; mode = "dig"; el.btnMode.textContent = "⛏"; setPalette(T.DIRT);
+      mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0;
       wireInput();
       connectWs();
       lastTs = 0; acc = 0;
@@ -588,6 +855,7 @@
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
       remotes.clear();
       input.left = input.right = input.jump = false;
+      mine.pid = -1; mine.held = false; mine.prog = 0; mine.tx = -1;
     }
 
     function connectWs() {
@@ -602,14 +870,19 @@
         let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
         if (m.t === "init") {
           world = m.world || world;
-          hasWorld = true;
-          groundCanvas = null; // rebuild tiles for the real world
+          seed = m.seed | 0 || 1;
+          overlay.clear(); chunkData.clear(); chunkTex.clear(); lru.length = 0; hcache.clear();
+          for (const e of (m.mods || [])) overlay.set(e[0] + "," + e[1], e[2]);
+          buildOverview();
+          const self = (m.players || {})[m.you];
+          if (self) { me.x = self.x; me.y = self.y; me.vy = 0; me.grounded = false; }
           remotes.clear();
           for (const pid of Object.keys(m.players || {})) {
             if (pid === myId) continue;
             const p = m.players[pid];
             remotes.set(pid, { id: pid, name: p.name || "?", x: p.x, y: p.y, tx: p.x, ty: p.y });
           }
+          hasWorld = true;
           updateCount();
         } else if (m.t === "+") {
           remotes.set(m.id, { id: m.id, name: m.name || "?", x: m.x, y: m.y, tx: m.x, ty: m.y });
@@ -620,6 +893,8 @@
         } else if (m.t === "p") {
           const r = remotes.get(m.id);
           if (r) { r.tx = m.x; r.ty = m.y; }
+        } else if (m.t === "b") {
+          setTileLocal(m.x, m.y, m.v);
         }
       };
       ws.onclose = () => {
@@ -635,15 +910,42 @@
       reconnectTimer = setTimeout(() => { reconnectTimer = 0; if (active) connectWs(); }, 2000);
     }
 
-    // ── physics (own block only) ──
+    // ── physics (own block only): AABB vs tile grid ──
     function step(dt) {
-      const floorY = world.floorTop - world.block;
       const vx = (input.right ? SPD : 0) - (input.left ? SPD : 0);
       if (input.jump && me.grounded) { me.vy = -JUMP; me.grounded = false; }
       me.vy += G * dt;
-      me.x = clamp(me.x + vx * dt, 0, world.w - world.block);
+
+      // horizontal move + wall collision
+      me.x += vx * dt;
+      if (vx > 0) {
+        const tx = Math.floor(me.x + PW);
+        for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + PH - 1e-6); ty++) {
+          if (solid(tx, ty)) { me.x = tx - PW - 1e-4; break; }
+        }
+      } else if (vx < 0) {
+        const tx = Math.floor(me.x);
+        for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + PH - 1e-6); ty++) {
+          if (solid(tx, ty)) { me.x = tx + 1; break; }
+        }
+      }
+      me.x = clamp(me.x, 0, world.w - PW);
+
+      // vertical move + floor/ceiling collision
       me.y += me.vy * dt;
-      if (me.y >= floorY) { me.y = floorY; me.vy = 0; me.grounded = true; }
+      me.grounded = false;
+      if (me.vy > 0) {
+        const ty = Math.floor(me.y + PH);
+        for (let tx = Math.floor(me.x); tx <= Math.floor(me.x + PW - 1e-6); tx++) {
+          if (solid(tx, ty)) { me.y = ty - PH; me.vy = 0; me.grounded = true; break; }
+        }
+      } else if (me.vy < 0) {
+        const ty = Math.floor(me.y);
+        for (let tx = Math.floor(me.x); tx <= Math.floor(me.x + PW - 1e-6); tx++) {
+          if (solid(tx, ty)) { me.y = ty + 1; me.vy = 0; break; }
+        }
+      }
+      if (me.y > world.h - PH) { me.y = world.h - PH; me.vy = 0; me.grounded = true; }
 
       // ease remote blocks toward their latest reported position
       const k = Math.min(1, dt * 14);
@@ -652,10 +954,33 @@
         r.y += (r.ty - r.y) * k;
       }
 
+      // mining / placing while held
+      if (mine.held && mine.action === "dig" && mine.tx >= 0) {
+        if (!validDigTarget(mine.tx, mine.ty)) {
+          mine.prog = Math.max(0, mine.prog - dt * 2.5); // wandered off → heals
+        } else {
+          mine.prog += dt / (HARD[getTile(mine.tx, mine.ty)] || 1);
+          if (mine.prog >= 1) {
+            setTileLocal(mine.tx, mine.ty, T.AIR); // optimistic; server confirms
+            if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "dig", x: mine.tx, y: mine.ty }));
+            mine.prog = 0;
+            const tx2 = Math.floor(mine.wx), ty2 = Math.floor(mine.wy);
+            if (validDigTarget(tx2, ty2)) { mine.tx = tx2; mine.ty = ty2; }
+            else mine.tx = -1;
+          }
+        }
+      } else if (mine.prog > 0) {
+        mine.prog = Math.max(0, mine.prog - dt * 2.5); // released → damage relapses
+      }
+      if (mine.held && mine.action === "place") {
+        mine.placeT += dt;
+        if (mine.placeT >= 0.22) { mine.placeT = 0; if (mine.tx >= 0) tryPlace(mine.tx, mine.ty); }
+      }
+
       // report position (~11 Hz, only when it changed)
       const now = performance.now();
       if (ws && ws.readyState === 1 && now - lastSend > 90) {
-        const rx = Math.round(me.x), ry = Math.round(me.y);
+        const rx = Math.round(me.x * 100) / 100, ry = Math.round(me.y * 100) / 100;
         if (rx !== lastSentX || ry !== lastSentY) {
           ws.send(JSON.stringify({ t: "p", x: rx, y: ry }));
           lastSentX = rx; lastSentY = ry; lastSend = now;
@@ -670,7 +995,34 @@
       }
     }
 
+    // ── dig & place ──
+    const mine = { pid: -1, action: "dig", tx: -1, ty: 0, wx: 0, wy: 0, prog: 0, held: false, placeT: 0 };
+
+    function inReach(tx, ty) {
+      const dx = tx + 0.5 - (me.x + PW / 2), dy = ty + 0.5 - (me.y + PH / 2);
+      const r = world.reach + 0.3;
+      return dx * dx + dy * dy <= r * r;
+    }
+    function validDigTarget(tx, ty) {
+      const v = getTile(tx, ty);
+      return v !== T.AIR && v !== T.BEDROCK && inReach(tx, ty);
+    }
+    function tryPlace(tx, ty) {
+      if (getTile(tx, ty) !== T.AIR || !inReach(tx, ty)) return;
+      const hit = (p) => tx < p.x + PW && tx + 1 > p.x && ty < p.y + PH && ty + 1 > p.y;
+      if (hit(me)) return;
+      for (const r of remotes.values()) if (hit(r)) return;
+      setTileLocal(tx, ty, palette); // optimistic; server confirms
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: palette }));
+    }
+    function tileFromEvent(e) {
+      const wx = camX + e.clientX / pxm, wy = camY + e.clientY / pxm;
+      mine.wx = wx; mine.wy = wy;
+      return [Math.floor(wx), Math.floor(wy)];
+    }
+
     // ── render ──
+    let camX = 0, camY = 0;
     function loop(ts) {
       if (!active) { raf = 0; return; }
       raf = requestAnimationFrame(loop);
@@ -691,13 +1043,11 @@
       if (canvas.width !== ((cw * dpr) | 0) || canvas.height !== ((ch * dpr) | 0)) {
         canvas.width = (cw * dpr) | 0; canvas.height = (ch * dpr) | 0;
       }
-      const VIEW_H = 1100;                        // visible world height — slightly zoomed out
-      const scale = ch / VIEW_H;
-      const camY = world.floorTop - VIEW_H * 0.82; // keep the floor near the bottom
-      const visW = cw / scale;
-      let camX;
-      if (visW >= world.w) camX = (world.w - visW) / 2;
-      else camX = clamp(me.x + world.block / 2 - visW / 2, 0, world.w - visW);
+      const viewW = cw / pxm, viewH = ch / pxm;
+      camX = viewW >= world.w ? (world.w - viewW) / 2
+        : clamp(me.x + PW / 2 - viewW / 2, 0, world.w - viewW);
+      camY = viewH >= world.h + 80 ? (world.h - viewH) / 2
+        : clamp(me.y + PH / 2 - viewH * 0.55, -40, world.h - viewH);
 
       // sky (screen space)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -706,68 +1056,96 @@
       ctx.fillStyle = g; ctx.fillRect(0, 0, cw, ch);
 
       // world space
-      ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
-      ctx.translate(0, -camY);
+      ctx.setTransform(dpr * pxm, 0, 0, dpr * pxm, -camX * dpr * pxm, -camY * dpr * pxm);
 
-      // moon — slowest parallax layer
+      // moon — slow parallax
       ctx.save();
-      ctx.translate(-camX * 0.1, 0);
-      ctx.fillStyle = "rgba(232,236,248,.9)";
-      ctx.beginPath(); ctx.arc(4200, 130, 34, 0, 7); ctx.fill();
+      ctx.translate(camX * 0.9, 0);
       ctx.fillStyle = "rgba(232,236,248,.25)";
-      ctx.beginPath(); ctx.arc(4200, 130, 52, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(world.w * 0.85, 20, 1.9, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(232,236,248,.9)";
+      ctx.beginPath(); ctx.arc(world.w * 0.85, 20, 1.2, 0, 7); ctx.fill();
       ctx.restore();
 
-      // main layer: ground blocks + players
-      ctx.save();
-      ctx.translate(-camX, 0);
+      if (!hasWorld) return;
 
-      if (!groundCanvas) buildGround();
-      ctx.drawImage(groundCanvas, 0, world.floorTop);
-      // world edges
-      ctx.fillStyle = "rgba(255,255,255,.14)";
-      ctx.fillRect(0, world.floorTop - 60, 4, 60);
-      ctx.fillRect(world.w - 4, world.floorTop - 60, 4, 60);
+      if (pxm >= 3) {
+        // chunk canvases for the visible range
+        const cx0 = Math.max(0, Math.floor(camX / CH));
+        const cx1 = Math.min(Math.ceil(world.w / CH) - 1, Math.floor((camX + viewW) / CH));
+        const cy0 = Math.max(0, Math.floor(camY / CH));
+        const cy1 = Math.min(Math.ceil(world.h / CH) - 1, Math.floor((camY + viewH) / CH));
+        ctx.imageSmoothingEnabled = pxm < TEXPX;
+        for (let cy = cy0; cy <= cy1; cy++)
+          for (let cx = cx0; cx <= cx1; cx++)
+            ctx.drawImage(chunkCanvasFor(cx, cy), cx * CH, cy * CH, CH, CH);
+      } else {
+        // fully zoomed out: one low-res overview image
+        ctx.imageSmoothingEnabled = true;
+        if (ovCanvas) ctx.drawImage(ovCanvas, 0, 0, world.w, world.h);
+        for (const r of remotes.values()) drawDot(r);
+        drawDot({ x: me.x, y: me.y, name: myName }, true);
+        return;
+      }
 
+      // players
       for (const r of remotes.values()) {
         const p = room && room.remoteParticipants.get(r.id);
         r.muted = p ? !p.isMicrophoneEnabled : false;
-        drawBlock(r, false);
+        drawPlayer(r, false);
       }
-      drawBlock({ id: myId, name: myName, x: me.x, y: me.y, muted: muted }, true);
+      drawPlayer({ id: myId, name: myName, x: me.x, y: me.y, muted: muted }, true);
 
-      ctx.restore();
+      // mining target: highlight + cracks
+      if (mine.tx >= 0 && mine.prog > 0.02) {
+        ctx.strokeStyle = "rgba(255,255,255,.85)";
+        ctx.lineWidth = 0.06;
+        ctx.strokeRect(mine.tx + 0.03, mine.ty + 0.03, 0.94, 0.94);
+        const st = Math.min(3, Math.floor(mine.prog * 4));
+        ctx.strokeStyle = "rgba(0,0,0," + (0.25 + 0.5 * mine.prog) + ")";
+        ctx.lineWidth = 0.05;
+        ctx.beginPath();
+        for (let i = 0; i <= st; i++) {
+          ctx.moveTo(mine.tx + 0.1 + hash2(mine.tx, mine.ty, 90 + i) * 0.8,
+                     mine.ty + 0.1 + hash2(mine.tx, mine.ty, 110 + i) * 0.8);
+          ctx.lineTo(mine.tx + 0.1 + hash2(mine.tx, mine.ty, 130 + i) * 0.8,
+                     mine.ty + 0.1 + hash2(mine.tx, mine.ty, 150 + i) * 0.8);
+        }
+        ctx.stroke();
+      }
     }
 
-    function drawBlock(p, isMe) {
-      const b = world.block;
+    function drawDot(p, isMe) {
+      const r = 4 / pxm; // constant ~4 px on screen
+      ctx.fillStyle = isMe ? "#ffffff" : "hsl(" + hueFor(p.name) + " 72% 68%)";
+      ctx.beginPath(); ctx.arc(p.x + PW / 2, p.y + PH / 2, r, 0, 7); ctx.fill();
+    }
+
+    function drawPlayer(p, isMe) {
       ctx.fillStyle = "hsl(" + hueFor(p.name) + " 72% 68%)";
-      ctx.fillRect(p.x, p.y, b, b);
+      ctx.fillRect(p.x, p.y, PW, PH);
       ctx.strokeStyle = isMe ? "#ffffff" : "rgba(255,255,255,.35)";
-      ctx.lineWidth = isMe ? 3 : 2;
-      ctx.strokeRect(p.x + 1, p.y + 1, b - 2, b - 2);
-      // eyes
-      ctx.fillStyle = "#101427";
-      ctx.fillRect(p.x + b * 0.22, p.y + b * 0.3, b * 0.14, b * 0.14);
-      ctx.fillRect(p.x + b * 0.64, p.y + b * 0.3, b * 0.14, b * 0.14);
-      // name
-      ctx.font = "600 15px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillStyle = "rgba(0,0,0,.55)";
-      ctx.fillText(p.name, p.x + b / 2 + 1, p.y - 25);
-      ctx.fillStyle = "#e9edfb";
-      ctx.fillText(p.name, p.x + b / 2, p.y - 26);
-      // speaking indicator
-      if (speaking.has(p.id) && !p.muted) {
-        const pulse = 5 + Math.sin(performance.now() / 150) * 1.6;
-        ctx.fillStyle = "#35d99a";
-        ctx.beginPath(); ctx.arc(p.x + b / 2, p.y - 11, pulse, 0, 7); ctx.fill();
+      ctx.lineWidth = isMe ? 0.06 : 0.045;
+      ctx.strokeRect(p.x + 0.02, p.y + 0.02, PW - 0.04, PH - 0.04);
+      if (pxm >= 12) {
+        ctx.fillStyle = "#1b2233"; // eyes
+        ctx.fillRect(p.x + 0.18, p.y + 0.4, 0.12, 0.14);
+        ctx.fillRect(p.x + 0.5, p.y + 0.4, 0.12, 0.14);
+        if (p.name) {
+          ctx.font = "600 0.34px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillStyle = "rgba(233,237,251,.9)";
+          ctx.fillText(p.name, p.x + PW / 2, p.y - 0.14);
+        }
       }
-      // muted mark (small red crossed circle, top-right corner of the block)
+      if (speaking.has(p.id)) {
+        ctx.strokeStyle = "rgba(53,217,154,.9)";
+        ctx.lineWidth = 0.05;
+        ctx.strokeRect(p.x - 0.06, p.y - 0.06, PW + 0.12, PH + 0.12);
+      }
       if (p.muted) {
-        ctx.strokeStyle = "#ff6b6b"; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(p.x + b - 2, p.y + 2, 8, 0, 7); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(p.x + b - 8, p.y - 4); ctx.lineTo(p.x + b + 4, p.y + 8); ctx.stroke();
+        ctx.fillStyle = "#ff6b6b";
+        ctx.fillRect(p.x + PW - 0.16, p.y + 0.08, 0.1, 0.1);
       }
     }
 
@@ -792,6 +1170,11 @@
         else if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
           input.jump = true; e.preventDefault();
         }
+        else if (e.key === "1") setPalette(T.DIRT);
+        else if (e.key === "2") setPalette(T.STONE);
+        else if (e.key === "3") setPalette(T.WOOD);
+        else if (e.key === "+" || e.key === "=") zoomIn();
+        else if (e.key === "-") zoomOut();
       });
       window.addEventListener("keyup", (e) => {
         if (MOVE[e.key]) input[MOVE[e.key]] = false;
@@ -800,9 +1183,50 @@
       bindPad(el.btnLeft, "left");
       bindPad(el.btnRight, "right");
       bindPad(el.btnJump, "jump");
-      document.addEventListener("contextmenu", (e) => {
-        if (e.target && e.target.classList && e.target.classList.contains("pad-btn")) e.preventDefault();
+
+      // dig / place on the canvas (mouse or touch)
+      canvas.addEventListener("pointerdown", (e) => {
+        if (!active || !hasWorld || mine.pid !== -1) return;
+        // decide per-event, not per-device: mouse buttons choose dig/place,
+        // touch & pen follow the on-screen mode toggle
+        let action;
+        if (e.pointerType === "mouse") {
+          if (e.button === 2) action = "place";
+          else if (e.button === 0) action = "dig";
+          else return;
+        } else {
+          if (e.button !== 0 && e.pointerType !== "touch") return;
+          action = mode;
+        }
+        const [tx, ty] = tileFromEvent(e);
+        mine.pid = e.pointerId; mine.action = action; mine.held = true; mine.placeT = 0;
+        if (action === "dig") {
+          if (validDigTarget(tx, ty)) { mine.tx = tx; mine.ty = ty; mine.prog = 0; }
+          else mine.tx = -1;
+        } else {
+          mine.tx = tx; mine.ty = ty;
+          tryPlace(tx, ty);
+        }
+        try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
       });
+      canvas.addEventListener("pointermove", (e) => {
+        if (e.pointerId !== mine.pid || !mine.held) return;
+        const [tx, ty] = tileFromEvent(e);
+        if (mine.action === "dig") {
+          if (tx !== mine.tx || ty !== mine.ty) {
+            mine.prog = 0; // moved to a new tile → the old one heals
+            if (validDigTarget(tx, ty)) { mine.tx = tx; mine.ty = ty; }
+            else mine.tx = -1;
+          }
+        } else {
+          mine.tx = tx; mine.ty = ty;
+        }
+      });
+      const release = (e) => { if (e.pointerId === mine.pid) { mine.pid = -1; mine.held = false; } };
+      canvas.addEventListener("pointerup", release);
+      canvas.addEventListener("pointercancel", release);
+
       // clean close when the page is backgrounded/killed → no ghost left behind
       window.addEventListener("pagehide", () => { try { if (ws) ws.close(); } catch (_) {} });
     }
@@ -823,11 +1247,16 @@
     }
 
     return {
-      start, stop,
+      start, stop, zoomIn, zoomOut, toggleMode, setPalette,
       isActive: () => active,
       hasWorld: () => hasWorld,
       remoteCount: () => remotes.size,
-      _debug: { me, remotes, get world() { return world; } },
+      _debug: {
+        me, remotes, get world() { return world; }, get seed() { return seed; },
+        get pxm() { return pxm; }, getTile, tileAt: (x, y) => tileAt(x, y),
+        heightAt, overlay, mine,
+        get camX() { return camX; }, get camY() { return camY; },
+      },
     };
   })();
 

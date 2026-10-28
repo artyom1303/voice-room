@@ -13,10 +13,12 @@
 //  Bindings (Settings → Bindings → Durable Object):
 //    ROOMS  →  class GameRoom
 //
-//  The Durable Object is the authoritative game room: it tracks every
-//  player's position, relays updates to the others, and SAVES positions
-//  to its built-in storage — so the world survives everyone leaving and
-//  is restored when someone re-enters. Nobody is ever "host".
+//  World: 10,000 × 2,000 tiles, 1 tile = 1 m, procedurally generated
+//  from a per-room seed (identical on every client and here — the
+//  terrain code below must stay in sync with index.html). The Durable
+//  Object stores ONLY the seed, player positions, and the list of
+//  dug/placed blocks ("mods"). Nobody is ever "host": the world
+//  survives everyone leaving and is restored on re-entry.
 // ═══════════════════════════════════════════════════════════════════
 
 const CORS_HEADERS = {
@@ -28,23 +30,75 @@ const CORS_HEADERS = {
 const ROOM_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 // Ghost reaping: clients send a heartbeat every 5 s; the room sweeps
-// every SWEEP_MS and removes anyone silent for more than STALE_MS
-// (killed browsers and locked phones never send a close frame).
+// every SWEEP_MS and removes anyone silent for more than STALE_MS.
 const SWEEP_MS = 20000;
 const STALE_MS = 30000;
 
-// World constants — single source of truth. The Durable Object sends
-// this to every client in the "init" message, so the world is identical
-// for everyone (and matches the proximity-voice range: hear = 20 blocks).
+// ── World constants (KEEP IN SYNC with index.html) ────────────────
 const WORLD = {
-  w: 4800,        // world width in px — a few screens wide
-  h: 800,         // world height in px (vertical fits the screen)
-  block: 40,      // player block size
-  floorTop: 680,  // y of the floor surface
-  hear: 800,      // proximity voice range = 20 player widths
-  spawnMin: 200,  // random spawn x in [spawnMin, spawnMin+spawnSpan]
-  spawnSpan: 500, // < hear range, so everyone always spawns within earshot
+  w: 10000,     // tiles wide (1 tile = 1 m)
+  h: 2000,      // tiles deep
+  hear: 16,     // proximity voice range = 20 player widths (0.8 m)
+  reach: 5,     // dig/place reach in tiles
+  spawnX: 5000, // everyone spawns near world center → always in earshot
 };
+const PW = 0.8, PH = 1.8; // player collision box (m)
+
+// Tile types
+const T_AIR = 0, T_GRASS = 1, T_DIRT = 2, T_STONE = 3, T_ORE = 4, T_WOOD = 5, T_BEDROCK = 6;
+// Seconds to mine per type (bedrock = unbreakable)
+const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1 };
+const PLACEABLE = { 2: 1, 3: 1, 5: 1 };
+
+// ── Deterministic terrain (KEEP IN SYNC with index.html) ──────────
+function hash2(x, y, seed) {
+  let h = ((x | 0) * 374761393 + (y | 0) * 668265263 + (seed | 0) * 974711) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function smooth(t) { return t * t * (3 - 2 * t); }
+function vnoise1(x, seed) {
+  const xi = Math.floor(x), xf = x - xi;
+  const a = hash2(xi, 0, seed), b = hash2(xi + 1, 0, seed);
+  return a + (b - a) * smooth(xf);
+}
+function fbm1(x, seed, oct) {
+  let v = 0, amp = 1, f = 1, norm = 0;
+  for (let i = 0; i < oct; i++) { v += vnoise1(x * f, seed + i * 101) * amp; norm += amp; amp *= 0.5; f *= 2; }
+  return v / norm;
+}
+function vnoise2(x, y, seed) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const a = hash2(xi, yi, seed), b = hash2(xi + 1, yi, seed);
+  const c = hash2(xi, yi + 1, seed), d = hash2(xi + 1, yi + 1, seed);
+  const u = smooth(xf), v = smooth(yf);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm2(x, y, seed, oct) {
+  let v = 0, amp = 1, f = 1, norm = 0;
+  for (let i = 0; i < oct; i++) { v += vnoise2(x * f, y * f, seed + i * 733) * amp; norm += amp; amp *= 0.5; f *= 2; }
+  return v / norm;
+}
+function heightAt(seed, x) { // y of the surface (grass) row; y grows down
+  const hills = fbm1(x / 140, seed, 3) - 0.5;
+  const broad = fbm1(x / 800, seed + 7, 2) - 0.5;
+  return clamp(Math.floor(130 + hills * 76 + broad * 140), 40, WORLD.h - 60);
+}
+function tileAt(seed, x, y) {
+  x |= 0; y |= 0;
+  if (y < 0) return T_AIR;
+  if (x < 0 || x >= WORLD.w || y >= WORLD.h) return T_BEDROCK;
+  if (y === WORLD.h - 1) return T_BEDROCK; // unbreakable world floor
+  const h = heightAt(seed, x);
+  if (y < h) return T_AIR;
+  const d = y - h;
+  if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T_AIR; // caves
+  if (d === 0) return T_GRASS;
+  if (d < 5) return T_DIRT;
+  if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T_ORE;
+  return T_STONE;
+}
 
 export default {
   async fetch(request, env) {
@@ -159,29 +213,40 @@ function b64urlBytes(bytes) {
 // ═══════════════════════════════════════════════════════════════════
 //  GameRoom — Durable Object. One instance per room name.
 //
-//  Client → here:   { t:"p", x, y }            position update
-//  Here → client:   { t:"init", you, world, players }   on join
-//                   { t:"+", id, name, x, y }   someone joined
-//                   { t:"p", id, x, y }         someone moved
-//                   { t:"-", id }               someone left
+//  Client → here:   { t:"p", x, y }              position update
+//                   { t:"hb" }                    heartbeat
+//                   { t:"dig", x, y }             break tile (validated)
+//                   { t:"place", x, y, v }        place tile (validated)
+//  Here → client:   { t:"init", you, world, seed, players, mods }
+//                   { t:"+", id, name, x, y }     someone joined
+//                   { t:"p", id, x, y }           someone moved
+//                   { t:"-", id }                 someone left
+//                   { t:"b", x, y, v }            tile changed (0 = air)
 //
-//  Positions persist in SQLite storage ("saved"): when everyone leaves
-//  the room keeps their spots, and re-entering later puts you back
-//  where you were.
+//  The terrain itself is procedural; only edits ("mods"), the seed,
+//  and player positions are persisted.
 // ═══════════════════════════════════════════════════════════════════
 
 export class GameRoom {
   constructor(ctx, env) {
     this.ctx = ctx;
-    this.players = new Map(); // connected: id -> { name, x, y, cid }
+    this.players = new Map(); // connected: id -> { name, x, y, cid, lastSeen }
     this.saved = {};          // persisted:  id -> { name, x, y }
+    this.mods = [];           // persisted:  [[x, y, v], ...] every dig/place ever
+    this.modMap = new Map();  // "x,y" -> v  (fast lookup mirror of mods)
+    this.seed = 0;
     this.saveTimer = null;
     this.ready = ctx.blockConcurrencyWhile(async () => {
       try {
         this.saved = (await ctx.storage.get("saved")) || {};
+        this.mods = (await ctx.storage.get("mods")) || [];
+        let s = await ctx.storage.get("seed");
+        if (!s) { s = ((Math.random() * 0x7fffffff) | 0) || 1; await ctx.storage.put("seed", s); }
+        this.seed = s;
       } catch (_) {
-        this.saved = {};
+        this.saved = {}; this.mods = []; this.seed = this.seed || 1;
       }
+      for (const [x, y, v] of this.mods) this.modMap.set(x + "," + y, v);
       // Rebuild after waking from hibernation: sockets are still open,
       // reload their players from storage. lastSeen resets — an open
       // socket is proof of life.
@@ -193,12 +258,34 @@ export class GameRoom {
             name: a.name,
             cid: a.cid,
             lastSeen: Date.now(),
-            x: s ? s.x : spawnX(),
-            y: s ? s.y : WORLD.floorTop - WORLD.block,
+            lastBreak: 0,
+            lastPlace: 0,
+            x: s ? s.x : this.spawn().x,
+            y: s ? s.y : this.spawn().y,
           });
         }
       }
     });
+  }
+
+  spawn() {
+    const x = WORLD.spawnX - 6 + Math.floor(Math.random() * 12);
+    return { x, y: heightAt(this.seed, x) - PH - 0.05 };
+  }
+
+  effective(x, y) {
+    const v = this.modMap.get(x + "," + y);
+    return v === undefined ? tileAt(this.seed, x, y) : v;
+  }
+
+  inReach(p, x, y) {
+    const dx = x + 0.5 - (p.x + PW / 2);
+    const dy = y + 0.5 - (p.y + PH / 2);
+    return dx * dx + dy * dy <= 5.8 * 5.8; // a little slack over WORLD.reach for lag
+  }
+
+  correct(ws, x, y) { // tell one client the authoritative state of a tile
+    try { ws.send(JSON.stringify({ t: "b", x, y, v: this.effective(x, y) })); } catch (_) {}
   }
 
   async fetch(request) {
@@ -217,17 +304,17 @@ export class GameRoom {
     const cid = Math.random().toString(36).slice(2, 10);
     ws.serializeAttachment({ id, name, cid });
 
-    // Returning player → back to their saved spot; new player → random spawn.
+    // Returning player → back to their saved spot; new player → surface spawn.
     const s = this.saved[id];
-    const start = {
-      x: s ? s.x : spawnX(),
-      y: s ? s.y : WORLD.floorTop - WORLD.block,
-    };
-    this.players.set(id, { name, cid, lastSeen: Date.now(), x: start.x, y: start.y });
+    const start = s ? { x: s.x, y: s.y } : this.spawn();
+    this.players.set(id, { name, cid, lastSeen: Date.now(), lastBreak: 0, lastPlace: 0, x: start.x, y: start.y });
 
     const roster = {};
     for (const [pid, p] of this.players) roster[pid] = { name: p.name, x: p.x, y: p.y };
-    ws.send(JSON.stringify({ t: "init", you: id, world: WORLD, players: roster }));
+    ws.send(JSON.stringify({
+      t: "init", you: id, world: WORLD, seed: this.seed, players: roster,
+      mods: this.mods.length > 50000 ? this.mods.slice(-50000) : this.mods,
+    }));
     this.broadcast({ t: "+", id, name, x: start.x, y: start.y }, id);
     this.scheduleSave();
 
@@ -251,11 +338,43 @@ export class GameRoom {
     if (m.t === "hb") return; // heartbeat: presence only, no relay
 
     if (m.t === "p" && Number.isFinite(m.x) && Number.isFinite(m.y)) {
-      p.x = clamp(m.x, 0, WORLD.w - WORLD.block);
-      p.y = clamp(m.y, -4000, 4000);
-      this.broadcast({ t: "p", id: a.id, x: Math.round(p.x), y: Math.round(p.y) }, a.id);
+      p.x = clamp(m.x, 0, WORLD.w - PW);
+      p.y = clamp(m.y, -500, WORLD.h - PH);
+      this.broadcast({ t: "p", id: a.id, x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 }, a.id);
       this.scheduleSave();
+
+    } else if (m.t === "dig") {
+      const x = m.x | 0, y = m.y | 0;
+      if (x < 0 || y < 0 || x >= WORLD.w || y >= WORLD.h) return;
+      const v = this.effective(x, y);
+      if (v === T_AIR || v === T_BEDROCK || !this.inReach(p, x, y)) { this.correct(ws, x, y); return; }
+      const now = Date.now();
+      if (now - p.lastBreak < (HARD[v] || 1) * 800) { this.correct(ws, x, y); return; } // too fast
+      p.lastBreak = now;
+      this.setTile(x, y, T_AIR);
+      this.broadcast({ t: "b", x, y, v: T_AIR });
+
+    } else if (m.t === "place") {
+      const x = m.x | 0, y = m.y | 0, v = m.v | 0;
+      if (x < 0 || y < 0 || x >= WORLD.w || y >= WORLD.h) return;
+      if (!PLACEABLE[v]) return;
+      if (this.effective(x, y) !== T_AIR) { this.correct(ws, x, y); return; }
+      if (!this.inReach(p, x, y)) { this.correct(ws, x, y); return; }
+      const now = Date.now();
+      if (now - p.lastPlace < 160) { this.correct(ws, x, y); return; } // too fast
+      for (const pl of this.players.values()) { // never entomb a player
+        if (x < pl.x + PW && x + 1 > pl.x && y < pl.y + PH && y + 1 > pl.y) { this.correct(ws, x, y); return; }
+      }
+      p.lastPlace = now;
+      this.setTile(x, y, v);
+      this.broadcast({ t: "b", x, y, v });
     }
+  }
+
+  setTile(x, y, v) {
+    this.modMap.set(x + "," + y, v);
+    this.mods.push([x, y, v]);
+    this.scheduleSave();
   }
 
   // Liveness sweeper. Runs every SWEEP_MS while anyone is connected;
@@ -264,7 +383,7 @@ export class GameRoom {
     const now = Date.now();
     for (const [id, p] of [...this.players]) {
       if (now - p.lastSeen > STALE_MS) {
-        this.saved[id] = { name: p.name, x: Math.round(p.x), y: Math.round(p.y) };
+        this.saved[id] = { name: p.name, x: p.x, y: p.y };
         this.players.delete(id);
         for (const ws of this.ctx.getWebSockets()) {
           const a = safeAttachment(ws);
@@ -287,7 +406,7 @@ export class GameRoom {
     if (!a || !a.id) return;
     const p = this.players.get(a.id);
     if (!p || p.cid !== a.cid) return; // already re-joined on a newer socket
-    this.saved[a.id] = { name: p.name, x: Math.round(p.x), y: Math.round(p.y) };
+    this.saved[a.id] = { name: p.name, x: p.x, y: p.y };
     this.players.delete(a.id);
     this.broadcast({ t: "-", id: a.id }, a.id);
     this.scheduleSave();
@@ -310,17 +429,17 @@ export class GameRoom {
       this.saveTimer = null;
       const merged = { ...this.saved };
       for (const [id, p] of this.players) {
-        merged[id] = { name: p.name, x: Math.round(p.x), y: Math.round(p.y) };
+        merged[id] = { name: p.name, x: p.x, y: p.y };
       }
       this.saved = merged;
-      try { await this.ctx.storage.put("saved", merged); } catch (_) {}
+      try {
+        await this.ctx.storage.put("saved", merged);
+        await this.ctx.storage.put("mods", this.mods);
+      } catch (_) {}
     }, 1500);
   }
 }
 
-function spawnX() {
-  return WORLD.spawnMin + Math.floor(Math.random() * WORLD.spawnSpan);
-}
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
