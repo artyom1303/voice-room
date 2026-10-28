@@ -26,7 +26,7 @@
     -webkit-touch-callout: default;
   }
   a, img, button { -webkit-user-drag: none; }            /* drag ghost */
-  button, .btn-primary, .btn-ghost, .btn-danger, .pad-btn, .btn-round {
+  button, .btn-primary, .btn-ghost, .btn-danger, .pad-btn, .mic-btn {
     touch-action: manipulation;                          /* instant taps, no double-tap zoom */
   }
   body {
@@ -123,10 +123,19 @@
   .mid-pill { display: flex; align-items: center; gap: 10px; background: rgba(20,26,46,.66);
     border: 1px solid var(--border); backdrop-filter: blur(8px);
     border-radius: 99px; padding: 8px 14px; }
-  .btn-round { width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
-    display: grid; place-items: center; background: rgba(255,255,255,.08);
-    border: 1px solid var(--border); }
-  .btn-round.muted { background: rgba(255,107,107,.2); border-color: rgba(255,107,107,.5); color: #ffb3b3; }
+  /* round mic button, built from scratch: your loudness fills it green
+     from the bottom up. ONE border, no default button chrome (no second
+     outline), and the fill is a real layer clipped by the circle — so at
+     0% there is no green anywhere (no gradient edge artifacts). */
+  .mic-btn { position: relative; width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+    padding: 0; appearance: none; -webkit-appearance: none; outline: none;
+    overflow: hidden; background: rgba(255,255,255,.08);
+    border: 1px solid var(--border); color: var(--text); }
+  .mic-btn .mic-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0;
+    background: rgba(53,217,154,.6); pointer-events: none; }
+  .mic-btn .mic-ico { position: relative; z-index: 1; width: 100%; height: 100%;
+    display: grid; place-items: center; pointer-events: none; }
+  .mic-btn.muted { background: rgba(255,107,107,.18); border-color: rgba(255,107,107,.5); color: #ffb3b3; }
   .keys-hint { position: fixed; bottom: 92px; left: 0; right: 0; text-align: center;
     font-size: 12px; color: var(--muted); z-index: 4; pointer-events: none; }
   @media (pointer: coarse) { .keys-hint { display: none; } }
@@ -208,7 +217,7 @@
           <button id="btn-right" class="pad-btn" aria-label="Move right">▶</button>
         </div>
         <div class="mid-pill">
-          <button id="btn-mute" class="btn-round" aria-label="Mute"></button>
+          <button id="btn-mute" class="mic-btn" aria-label="Mute"><span class="mic-fill" id="mic-btn-fill"></span><span class="mic-ico"></span></button>
         </div>
         <div class="pad">
           <button id="btn-jump" class="pad-btn jump" aria-label="Jump">JUMP</button>
@@ -245,7 +254,7 @@
     btnJoin: $("btn-join"), joinStatus: $("join-status"),
     roomName: $("room-name"), roomCount: $("room-count"), btnCopy: $("btn-copy"),
     roomStatus: $("room-status"),
-    btnMute: $("btn-mute"), btnLeave: $("btn-leave"),
+    btnMute: $("btn-mute"), btnMuteFill: $("mic-btn-fill"), btnLeave: $("btn-leave"),
     gameCanvas: $("game-canvas"), audioOut: $("audio-out"),
     btnLeft: $("btn-left"), btnRight: $("btn-right"), btnJump: $("btn-jump"),
     btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"), btnMode: $("btn-mode"),
@@ -401,7 +410,7 @@
   function untapAllVoices() {
     for (const id of [...levelTaps.keys()]) untapVoice(id);
     myVoiceId = "";
-    el.btnMute.style.background = "";
+    el.btnMuteFill.style.height = "0%";
   }
 
   // Runs every frame from the game loop. Same RMS math + fast-attack /
@@ -417,16 +426,10 @@
       const level = Math.min(1, Math.sqrt(sum / t.data.length) * 3.2);
       voiceLevels.set(id, Math.max(level, (voiceLevels.get(id) || 0) * 0.82));
     }
-    // your own loudness fills the round mute button from the bottom up;
-    // when muted, the CSS .muted style (red) shows instead
-    if (muted || !myVoiceId) {
-      el.btnMute.style.background = "";
-    } else {
-      const lv = voiceLevels.get(myVoiceId) || 0;
-      el.btnMute.style.background =
-        "linear-gradient(to top, rgba(53,217,154,.8) " + (lv * 100) +
-        "%, rgba(255,255,255,.08) " + (lv * 100) + "%)";
-    }
+    // your own loudness fills the round mute button from the bottom up —
+    // a real height-based layer, so at 0 there is literally no green shown
+    const lv = (muted || !myVoiceId) ? 0 : (voiceLevels.get(myVoiceId) || 0);
+    el.btnMuteFill.style.height = (lv * 100) + "%";
   }
 
   // ── 5. LiveKit room (voice) ────────────────────────────────────
@@ -519,7 +522,7 @@
   }
   function updateMuteBtn() {
     el.btnMute.classList.toggle("muted", muted);
-    el.btnMute.innerHTML = muted ? ICON_MIC_OFF : ICON_MIC_ON;
+    el.btnMute.querySelector(".mic-ico").innerHTML = muted ? ICON_MIC_OFF : ICON_MIC_ON;
     el.btnMute.setAttribute("aria-label", muted ? "Unmute microphone" : "Mute microphone");
   }
 
@@ -1256,11 +1259,14 @@
         ctx.fillStyle = "#20263a";
         ctx.fillRect(x + 0.27 + ex, y + 0.30, 0.08, 0.11);
         ctx.fillRect(x + 0.45 + ex, y + 0.30, 0.08, 0.11);
-        // mouth = live loudness: thin slit when silent, opening linearly
-        // to a full square hole at max volume — the player's OWN audio
-        // level (same RMS math as the mic meter), refreshed every frame
-        const open = clamp(voiceLevels.get(p.id) || 0, 0, 1);
-        const mw = 0.16 + 0.02 * open, mh = 0.03 + 0.15 * open;
+        // mouth = live loudness: at silence a 2-device-px line; at full
+        // volume a rectangle 1.5× as tall as wide, growing DOWNWARD from
+        // the slit. sqrt() response boosts quiet sounds, so even soft
+        // speech clearly moves the mouth. Refreshed every frame.
+        const open = Math.sqrt(clamp(voiceLevels.get(p.id) || 0, 0, 1));
+        const mw = 0.16;
+        const slit = 2 / (pxm * (window.devicePixelRatio || 1)); // 2 device px, in m
+        const mh = slit + (1.5 * mw - slit) * open;
         ctx.fillStyle = "#40201e";
         ctx.fillRect(x + 0.40 - mw / 2 + ex, y + 0.43, mw, mh);
         if (p.name) {
