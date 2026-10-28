@@ -1138,7 +1138,7 @@
       for (const c of key) h = (h * 131 + c.charCodeAt(0)) | 0;
       return HAIR[(h >>> 0) % HAIR.length];
     }
-    const meAnim = { px: 0, ph: 0, face: 1 }; // own avatar's walk/facing state
+    const meAnim = { px: 0, ph: 0, face: 1, mo: 0, mt: 0 }; // own avatar's walk/facing/mouth state
 
     function drawPlayer(p, isMe) {
       const hue = hueFor(p.name || "?");
@@ -1149,7 +1149,7 @@
 
       // facing + walk cycle follow actual movement — remotes ease toward
       // their reported positions, so this animates them too, no extra data
-      const an = isMe ? meAnim : (p._an || (p._an = { px: x, ph: 0, face: 1 }));
+      const an = isMe ? meAnim : (p._an || (p._an = { px: x, ph: 0, face: 1, mo: 0, mt: 0 }));
       const dx = x - an.px; an.px = x;
       if (dx > 0.002) an.face = 1; else if (dx < -0.002) an.face = -1;
       const walking = Math.abs(dx) > 0.003;
@@ -1196,26 +1196,25 @@
         ctx.fillStyle = "#20263a";
         ctx.fillRect(x + 0.27 + ex, y + 0.30, 0.08, 0.11);
         ctx.fillRect(x + 0.45 + ex, y + 0.30, 0.08, 0.11);
-        if (pxm >= 20) {
-          ctx.fillStyle = "rgba(120,60,40,.8)";
-          ctx.fillRect(x + 0.33 + ex, y + 0.46, 0.14, 0.03); // smile
-        }
+        // mouth = the speaking indicator: a thin slit at rest, easing open
+        // to a square hole while talking (with a per-player jabber wobble
+        // so it flaps instead of just pegging open)
+        const now = performance.now();
+        const mdt = an.mt ? Math.min((now - an.mt) / 1000, 0.1) : 0.016;
+        an.mt = now;
+        const talking = speaking.has(p.id);
+        an.mo += ((talking ? 1 : 0) - an.mo) * Math.min(1, mdt * 10);
+        const jab = talking ? 0.65 + 0.35 * Math.abs(Math.sin(now / 45 + hue)) : 1;
+        const open = an.mo * jab;
+        const mw = 0.16 + 0.02 * open, mh = 0.03 + 0.15 * open;
+        ctx.fillStyle = "#40201e";
+        ctx.fillRect(x + 0.40 - mw / 2 + ex, y + 0.43, mw, mh);
         if (p.name) {
           ctx.font = "600 0.34px system-ui, sans-serif";
           ctx.textAlign = "center";
           ctx.fillStyle = "rgba(233,237,251,.9)";
           ctx.fillText(p.name, x + PW / 2, y - 0.14);
         }
-      }
-      if (isMe) {
-        ctx.strokeStyle = "rgba(255,255,255,.55)";
-        ctx.lineWidth = 0.045;
-        ctx.strokeRect(x + 0.02, y + 0.02, PW - 0.04, PH - 0.04);
-      }
-      if (speaking.has(p.id)) {
-        ctx.strokeStyle = "rgba(53,217,154,.9)";
-        ctx.lineWidth = 0.05;
-        ctx.strokeRect(x - 0.06, y - 0.06, PW + 0.12, PH + 0.12);
       }
       if (p.muted) {
         ctx.fillStyle = "#ff6b6b";
