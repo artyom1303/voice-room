@@ -546,6 +546,8 @@
 
     // ── kill default browser gestures/haptics everywhere ──
     // Long-press context menu = the tap-and-hold vibration on Android.
+    // (This stays as a fallback — the real buzz-killer is killTouchDefault,
+    // wired onto the canvas + pads in Game's input section.)
     // Text inputs keep theirs, so paste still works on the join form.
     const inField = (e) => e.target && e.target.closest && e.target.closest("input, textarea");
     document.addEventListener("contextmenu", (e) => { if (!inField(e)) e.preventDefault(); });
@@ -1159,6 +1161,16 @@
     }
 
     // ── input ──
+    // Tap-and-hold vibration fix: the long-press haptic fires when the OS
+    // RECOGNIZES the long-press gesture — canceling `contextmenu` afterwards
+    // still vibrates on many Android builds. preventDefault()ing the first
+    // touchstart consumes the touch sequence, so the gesture is never
+    // recognized at all → no menu, no buzz. The listener must be non-passive
+    // (touchstart defaults to passive on some targets). Pointer events still
+    // fire, so dig/place and pad input are unaffected. Applied only to the
+    // canvas and hold-to-move pad buttons — NOT to tap buttons (mute, zoom,
+    // …), which need the synthesized click that this would suppress.
+    const killTouchDefault = (e) => { if (e.cancelable) e.preventDefault(); };
     let inputWired = false;
     function wireInput() {
       if (inputWired) return;
@@ -1183,6 +1195,9 @@
       bindPad(el.btnLeft, "left");
       bindPad(el.btnRight, "right");
       bindPad(el.btnJump, "jump");
+
+      // kill long-press recognition (the tap-and-hold buzz) on the world view
+      canvas.addEventListener("touchstart", killTouchDefault, { passive: false });
 
       // dig / place on the canvas (mouse or touch)
       canvas.addEventListener("pointerdown", (e) => {
@@ -1231,6 +1246,8 @@
       window.addEventListener("pagehide", () => { try { if (ws) ws.close(); } catch (_) {} });
     }
     function bindPad(btn, key) {
+      // pads are HELD down → same long-press buzz as the canvas; kill it too
+      btn.addEventListener("touchstart", killTouchDefault, { passive: false });
       const on = (e) => {
         e.preventDefault();
         input[key] = true;
