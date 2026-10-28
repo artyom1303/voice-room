@@ -123,7 +123,6 @@
   .mid-pill { display: flex; align-items: center; gap: 10px; background: rgba(20,26,46,.66);
     border: 1px solid var(--border); backdrop-filter: blur(8px);
     border-radius: 99px; padding: 8px 14px; }
-  .mid-pill .meter { width: 84px; }
   .btn-round { width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
     display: grid; place-items: center; background: rgba(255,255,255,.08);
     border: 1px solid var(--border); }
@@ -210,7 +209,6 @@
         </div>
         <div class="mid-pill">
           <button id="btn-mute" class="btn-round" aria-label="Mute"></button>
-          <div class="meter"><div class="fill" id="local-fill"></div></div>
         </div>
         <div class="pad">
           <button id="btn-jump" class="pad-btn jump" aria-label="Jump">JUMP</button>
@@ -247,7 +245,7 @@
     btnJoin: $("btn-join"), joinStatus: $("join-status"),
     roomName: $("room-name"), roomCount: $("room-count"), btnCopy: $("btn-copy"),
     roomStatus: $("room-status"),
-    btnMute: $("btn-mute"), btnLeave: $("btn-leave"), localFill: $("local-fill"),
+    btnMute: $("btn-mute"), btnLeave: $("btn-leave"),
     gameCanvas: $("game-canvas"), audioOut: $("audio-out"),
     btnLeft: $("btn-left"), btnRight: $("btn-right"), btnJump: $("btn-jump"),
     btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"), btnMode: $("btn-mode"),
@@ -278,9 +276,9 @@
   let localAudioTrack = null;  // published LiveKit mic track
   let testStream = null;       // mic-test stream (pre-join only)
   let muted = false;
-  const speaking = new Set();  // identities of current active speakers
 
-  // ── 3. shared audio context (mic level meter only) ─────────────
+
+  // ── 3. shared audio context (mic test meter + voice level taps) ──
   // Remote voices play through plain <audio> elements — the most
   // reliable path across devices — and the game sets each element's
   // .volume every frame for the proximity fade.
@@ -373,6 +371,64 @@
     return "Could not access the microphone: " + ((err && err.message) || err);
   }
 
+  // ── voice levels: one analyser tap per speaker ───────────────────
+  // Drives every player's mouth and your mute-button fill. Each tap is an
+  // AnalyserNode on the ACTUAL audio — your mic track for you, the playing
+  // <audio> element's stream for others — read fresh every animation frame.
+  // That's what keeps lips synced with the sound: no events, no polling,
+  // just the same samples the speaker/ear is getting, 60× a second.
+  const voiceLevels = new Map();   // identity -> smoothed level 0..1
+  const levelTaps = new Map();     // identity -> { src, an, data }
+  let myVoiceId = "";
+
+  function tapVoice(identity, mediaStream) {
+    if (!identity || !mediaStream || levelTaps.has(identity)) return;
+    try {
+      const ac = ensureAudioCtx();
+      const src = ac.createMediaStreamSource(mediaStream);
+      const an = ac.createAnalyser();
+      an.fftSize = 512;
+      src.connect(an); // tap only — never to destination (no double audio)
+      levelTaps.set(identity, { src, an, data: new Uint8Array(an.fftSize) });
+    } catch (_) {}
+  }
+  function untapVoice(identity) {
+    const t = levelTaps.get(identity);
+    if (t) { try { t.src.disconnect(); } catch (_) {} }
+    levelTaps.delete(identity);
+    voiceLevels.delete(identity);
+  }
+  function untapAllVoices() {
+    for (const id of [...levelTaps.keys()]) untapVoice(id);
+    myVoiceId = "";
+    el.btnMute.style.background = "";
+  }
+
+  // Runs every frame from the game loop. Same RMS math + fast-attack /
+  // slow-release smoothing as the mic meter, so mouths and the button fill
+  // track the audible loudness exactly (attack is instant — no lip lag).
+  function updateVoiceLevels() {
+    for (const [id, t] of levelTaps) {
+      t.an.getByteTimeDomainData(t.data);
+      let sum = 0;
+      for (let i = 0; i < t.data.length; i++) {
+        const v = (t.data[i] - 128) / 128; sum += v * v;
+      }
+      const level = Math.min(1, Math.sqrt(sum / t.data.length) * 3.2);
+      voiceLevels.set(id, Math.max(level, (voiceLevels.get(id) || 0) * 0.82));
+    }
+    // your own loudness fills the round mute button from the bottom up;
+    // when muted, the CSS .muted style (red) shows instead
+    if (muted || !myVoiceId) {
+      el.btnMute.style.background = "";
+    } else {
+      const lv = voiceLevels.get(myVoiceId) || 0;
+      el.btnMute.style.background =
+        "linear-gradient(to top, rgba(53,217,154,.8) " + (lv * 100) +
+        "%, rgba(255,255,255,.08) " + (lv * 100) + "%)";
+    }
+  }
+
   // ── 5. LiveKit room (voice) ────────────────────────────────────
   async function onJoin() {
     const roomName = sanitizeRoom(el.inRoom.value);
@@ -423,16 +479,16 @@
       const a = track.attach();
       a.dataset.identity = participant.identity;
       el.audioOut.appendChild(a);
+      // tap the very stream that's playing → their mouth matches what you hear
+      tapVoice(participant.identity, a.srcObject);
     });
-    r.on(LK.RoomEvent.TrackUnsubscribed, (track) => {
+    r.on(LK.RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
+      if (participant) untapVoice(participant.identity);
       track.detach().forEach((n) => n.remove());
-    });
-    r.on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
-      speaking.clear();
-      speakers.forEach((p) => speaking.add(p.identity));
     });
     r.on(LK.RoomEvent.ParticipantConnected, updateCount);
     r.on(LK.RoomEvent.ParticipantDisconnected, (p) => {
+      untapVoice(p.identity);
       const a = el.audioOut.querySelector('[data-identity="' + CSS.escape(p.identity) + '"]');
       if (a) a.remove();
       updateCount();
@@ -493,16 +549,19 @@
     el.roomScreen.classList.remove("hidden");
     muted = false; updateMuteBtn();
     setStatus(el.roomStatus, "Connected.", "ok");
-    startMeter(new MediaStream([localAudioTrack.mediaStreamTrack]), el.localFill, null);
+    // tap your own mic: drives your mouth + the mute-button fill, zero latency
+    myVoiceId = room.localParticipant.identity;
+    tapVoice(myVoiceId, new MediaStream([localAudioTrack.mediaStreamTrack]));
     // Game joins with the SAME identity LiveKit gave us — that's how each
     // voice stream is matched to the right on-screen block for proximity.
-    Game.start(CFG.WORKER_URL, roomName, name, room.localParticipant.identity);
+    Game.start(CFG.WORKER_URL, roomName, name, myVoiceId);
     updateCount();
   }
 
   function exitRoomUI() {
     Game.stop();
     el.audioOut.innerHTML = "";
+    untapAllVoices();
     stopMeter();
     if (audioCtx && audioCtx.state !== "closed") audioCtx.close().catch(() => {});
     audioCtx = null;
@@ -1035,6 +1094,7 @@
       const h = 1 / 120;
       let n = 0;
       while (acc >= h && n < 8) { step(h); acc -= h; n++; }
+      updateVoiceLevels(); // fresh loudness for mouths + mute-button fill
       render();
       applyProximity();
     }
@@ -1138,7 +1198,7 @@
       for (const c of key) h = (h * 131 + c.charCodeAt(0)) | 0;
       return HAIR[(h >>> 0) % HAIR.length];
     }
-    const meAnim = { px: 0, ph: 0, face: 1, mo: 0, mt: 0 }; // own avatar's walk/facing/mouth state
+    const meAnim = { px: 0, ph: 0, face: 1 }; // own avatar's walk/facing state
 
     function drawPlayer(p, isMe) {
       const hue = hueFor(p.name || "?");
@@ -1149,7 +1209,7 @@
 
       // facing + walk cycle follow actual movement — remotes ease toward
       // their reported positions, so this animates them too, no extra data
-      const an = isMe ? meAnim : (p._an || (p._an = { px: x, ph: 0, face: 1, mo: 0, mt: 0 }));
+      const an = isMe ? meAnim : (p._an || (p._an = { px: x, ph: 0, face: 1 }));
       const dx = x - an.px; an.px = x;
       if (dx > 0.002) an.face = 1; else if (dx < -0.002) an.face = -1;
       const walking = Math.abs(dx) > 0.003;
@@ -1196,16 +1256,10 @@
         ctx.fillStyle = "#20263a";
         ctx.fillRect(x + 0.27 + ex, y + 0.30, 0.08, 0.11);
         ctx.fillRect(x + 0.45 + ex, y + 0.30, 0.08, 0.11);
-        // mouth = the speaking indicator: a thin slit at rest, easing open
-        // to a square hole while talking (with a per-player jabber wobble
-        // so it flaps instead of just pegging open)
-        const now = performance.now();
-        const mdt = an.mt ? Math.min((now - an.mt) / 1000, 0.1) : 0.016;
-        an.mt = now;
-        const talking = speaking.has(p.id);
-        an.mo += ((talking ? 1 : 0) - an.mo) * Math.min(1, mdt * 10);
-        const jab = talking ? 0.65 + 0.35 * Math.abs(Math.sin(now / 45 + hue)) : 1;
-        const open = an.mo * jab;
+        // mouth = live loudness: thin slit when silent, opening linearly
+        // to a full square hole at max volume — the player's OWN audio
+        // level (same RMS math as the mic meter), refreshed every frame
+        const open = clamp(voiceLevels.get(p.id) || 0, 0, 1);
         const mw = 0.16 + 0.02 * open, mh = 0.03 + 0.15 * open;
         ctx.fillStyle = "#40201e";
         ctx.fillRect(x + 0.40 - mw / 2 + ex, y + 0.43, mw, mh);
