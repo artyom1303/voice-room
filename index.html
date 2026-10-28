@@ -113,7 +113,7 @@
   .slot { width: 34px; height: 34px; border-radius: 9px; border: 2px solid rgba(255,255,255,.18);
     padding: 0; flex-shrink: 0; }
   .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
-  @media (pointer: fine) { #btn-mode { display: none; } }
+
   .pad { display: flex; gap: 10px; }
   .pad-btn { width: 64px; height: 64px; border-radius: 50%; background: rgba(20,26,46,.66);
     border: 1px solid var(--border); backdrop-filter: blur(8px); font-size: 20px;
@@ -205,7 +205,6 @@
           <button id="btn-zoom-in" class="pill-btn" aria-label="Zoom in">+</button>
         </div>
         <div class="pill">
-          <button id="btn-mode" class="pill-btn" aria-label="Dig mode">⛏</button>
           <button class="slot sel" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"></button>
           <button class="slot" data-tile="3" style="background:#57617e" aria-label="Place stone"></button>
           <button class="slot" data-tile="5" style="background:#8a6238" aria-label="Place wood"></button>
@@ -257,7 +256,7 @@
     btnMute: $("btn-mute"), btnMuteFill: $("mic-btn-fill"), btnLeave: $("btn-leave"),
     gameCanvas: $("game-canvas"), audioOut: $("audio-out"),
     btnLeft: $("btn-left"), btnRight: $("btn-right"), btnJump: $("btn-jump"),
-    btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"), btnMode: $("btn-mode"),
+    btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"),
   };
 
   const ICON_MIC_ON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
@@ -601,7 +600,7 @@
     el.btnLeave.addEventListener("click", onLeave);
     el.btnZoomIn.addEventListener("click", Game.zoomIn);
     el.btnZoomOut.addEventListener("click", Game.zoomOut);
-    el.btnMode.addEventListener("click", Game.toggleMode);
+
     document.querySelectorAll(".slot").forEach((b) =>
       b.addEventListener("click", () => Game.setPalette(+b.dataset.tile)));
     updateMuteBtn();
@@ -633,7 +632,8 @@
 
      Mining: hold on a tile — it chips at the block's hardness rate;
      release or wander out of reach and the damage heals back.
-     Desktop: LMB dig · RMB place · 1–3 pick block. Touch: mode toggle.
+     Desktop: LMB dig · RMB place · 1–3 pick block.
+     Touch: tap a block to dig it, tap air to build there — no mode toggle.
 
      Proximity voice: volume = 1 − |Δx| / world.hear.
      ═══════════════════════════════════════════════════════════════ */
@@ -723,18 +723,13 @@
     function zoomIn() { pxm = clamp(pxm * 1.5, fitScale(), 72); }
     function zoomOut() { pxm = clamp(pxm / 1.5, fitScale(), 72); }
 
-    // tools
-    let mode = "dig";          // touch devices toggle; desktop uses LMB/RMB
+    // tools: mouse uses LMB dig / RMB place; touch taps a block to dig it
+    // or taps air to build there — the palette picks which block gets built
     let palette = T.DIRT;
     function setPalette(v) {
       palette = v;
       document.querySelectorAll(".slot").forEach((b) =>
         b.classList.toggle("sel", +b.dataset.tile === v));
-    }
-    function toggleMode() {
-      mode = mode === "dig" ? "place" : "dig";
-      el.btnMode.textContent = mode === "dig" ? "⛏" : "🧱";
-      el.btnMode.setAttribute("aria-label", mode === "dig" ? "Dig mode" : "Place mode");
     }
 
     // ── overlay + chunk caches ──
@@ -904,7 +899,7 @@
       active = true; hasWorld = false;
       overlay.clear(); chunkData.clear(); chunkTex.clear(); lru.length = 0;
       hcache.clear(); ovCanvas = null; ovCtx = null;
-      pxm = 48; mode = "dig"; el.btnMode.textContent = "⛏"; setPalette(T.DIRT);
+      pxm = 48; setPalette(T.DIRT);
       mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0;
       wireInput();
       connectWs();
@@ -1154,12 +1149,8 @@
       }
 
       // players
-      for (const r of remotes.values()) {
-        const p = room && room.remoteParticipants.get(r.id);
-        r.muted = p ? !p.isMicrophoneEnabled : false;
-        drawPlayer(r, false);
-      }
-      drawPlayer({ id: myId, name: myName, x: me.x, y: me.y, muted: muted }, true);
+      for (const r of remotes.values()) drawPlayer(r, false);
+      drawPlayer({ id: myId, name: myName, x: me.x, y: me.y }, true);
 
       // mining target: highlight + cracks
       if (mine.tx >= 0 && mine.prog > 0.02) {
@@ -1220,12 +1211,6 @@
       const sw = walking ? Math.sin(an.ph) : 0;
       const liftL = Math.max(0, sw) * 0.1, liftR = Math.max(0, -sw) * 0.1;
 
-      // ground shadow
-      ctx.fillStyle = "rgba(0,0,0,.25)";
-      ctx.beginPath();
-      ctx.ellipse(x + PW / 2, y + PH - 0.02, 0.42, 0.07, 0, 0, 7);
-      ctx.fill();
-
       // legs + shoes (alternate lift while walking)
       ctx.fillStyle = pants;
       ctx.fillRect(x + 0.16, y + 1.10, 0.22, 0.54 - liftL);
@@ -1234,16 +1219,22 @@
       ctx.fillRect(x + 0.14, y + 1.64 - liftL, 0.26, 0.14);
       ctx.fillRect(x + 0.40, y + 1.64 - liftR, 0.26, 0.14);
 
-      // torso + arms + hands (sleeves echo the player's name-hue)
+      // torso + arms + hands (sleeves echo the player's name-hue).
+      // Arms SWING: each pivots around its shoulder like a pendulum,
+      // sweeping sideways with the walk cycle instead of bobbing up/down.
       ctx.fillStyle = shirt;
       ctx.fillRect(x + 0.12, y + 0.62, 0.56, 0.52);
-      const armSw = sw * 0.05;
-      ctx.fillStyle = sleeve;
-      ctx.fillRect(x + 0.02, y + 0.66 + armSw, 0.12, 0.36);
-      ctx.fillRect(x + 0.66, y + 0.66 - armSw, 0.12, 0.36);
-      ctx.fillStyle = SKIN;
-      ctx.fillRect(x + 0.02, y + 1.02 + armSw, 0.12, 0.10);
-      ctx.fillRect(x + 0.66, y + 1.02 - armSw, 0.12, 0.10);
+      const armA = sw * 0.5; // swing angle in radians, from the walk cycle
+      for (const side of [-1, 1]) {
+        ctx.save();
+        ctx.translate(x + (side < 0 ? 0.08 : 0.72), y + 0.68); // shoulder pivot
+        ctx.rotate(armA);
+        ctx.fillStyle = sleeve;
+        ctx.fillRect(-0.06, 0, 0.12, 0.34);
+        ctx.fillStyle = SKIN;
+        ctx.fillRect(-0.06, 0.34, 0.12, 0.10); // hand
+        ctx.restore();
+      }
 
       // head + hair
       ctx.fillStyle = SKIN;
@@ -1275,10 +1266,6 @@
           ctx.fillStyle = "rgba(233,237,251,.9)";
           ctx.fillText(p.name, x + PW / 2, y - 0.14);
         }
-      }
-      if (p.muted) {
-        ctx.fillStyle = "#ff6b6b";
-        ctx.fillRect(x + PW - 0.16, y + 0.08, 0.1, 0.1);
       }
     }
 
@@ -1333,18 +1320,19 @@
       // dig / place on the canvas (mouse or touch)
       canvas.addEventListener("pointerdown", (e) => {
         if (!active || !hasWorld || mine.pid !== -1) return;
-        // decide per-event, not per-device: mouse buttons choose dig/place,
-        // touch & pen follow the on-screen mode toggle
+        const [tx, ty] = tileFromEvent(e);
         let action;
         if (e.pointerType === "mouse") {
+          // mouse: buttons choose — LMB dig, RMB place
           if (e.button === 2) action = "place";
           else if (e.button === 0) action = "dig";
           else return;
         } else {
+          // touch & pen: what you tap chooses — a block means dig it,
+          // air means build the palette block there
           if (e.button !== 0 && e.pointerType !== "touch") return;
-          action = mode;
+          action = getTile(tx, ty) === T.AIR ? "place" : "dig";
         }
-        const [tx, ty] = tileFromEvent(e);
         mine.pid = e.pointerId; mine.action = action; mine.held = true; mine.placeT = 0;
         if (action === "dig") {
           if (validDigTarget(tx, ty)) { mine.tx = tx; mine.ty = ty; mine.prog = 0; }
@@ -1379,23 +1367,36 @@
     function bindPad(btn, key) {
       // pads are HELD down → same long-press buzz as the canvas; kill it too
       btn.addEventListener("touchstart", killTouchDefault, { passive: false });
+      let pid = null; // the finger currently holding this pad
       const on = (e) => {
+        if (e.pointerId === mine.pid) return; // that's the dig/build finger
         e.preventDefault();
+        // undo the implicit touch capture, so a held finger can SLIDE
+        // between ◀ ▶ JUMP and keep driving — no lift-and-retap needed
+        try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+        pid = e.pointerId;
         input[key] = true;
         btn.classList.add("held");
-        if (e.pointerId !== undefined && btn.setPointerCapture) {
-          try { btn.setPointerCapture(e.pointerId); } catch (_) {}
-        }
       };
-      const off = () => { input[key] = false; btn.classList.remove("held"); };
+      const off = (e) => {
+        if (pid === null || (e && e.pointerId !== pid)) return; // another finger
+        pid = null;
+        input[key] = false;
+        btn.classList.remove("held");
+      };
       btn.addEventListener("pointerdown", on);
+      // a held finger sliding onto the pad presses it (mouse or touch —
+      // implicit capture was released in `on`, so boundary events flow)
+      btn.addEventListener("pointerover", (e) => { if (e.buttons > 0) on(e); });
+      btn.addEventListener("pointerout", off);
       btn.addEventListener("pointerup", off);
       btn.addEventListener("pointercancel", off);
-      btn.addEventListener("lostpointercapture", off);
+      window.addEventListener("pointerup", off);      // lifted off anywhere
+      window.addEventListener("pointercancel", off);
     }
 
     return {
-      start, stop, zoomIn, zoomOut, toggleMode, setPalette,
+      start, stop, zoomIn, zoomOut, setPalette,
       isActive: () => active,
       hasWorld: () => hasWorld,
       remoteCount: () => remotes.size,
