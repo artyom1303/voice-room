@@ -126,9 +126,18 @@
   .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
   .slot .n { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: 700;
     color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9); pointer-events: none; }
-  .slot.zero { opacity: .38; }
+
 
   .pad { display: flex; gap: 10px; }
+  /* ghost-mode joystick (testerworld): replaces the walk/jump pads */
+  #joy { width: 132px; height: 132px; border-radius: 50%; background: rgba(20,26,46,.5);
+    border: 1px solid var(--border); backdrop-filter: blur(8px); position: relative;
+    touch-action: none; user-select: none; -webkit-user-select: none; flex-shrink: 0; }
+  #joy-knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px;
+    border-radius: 50%; background: rgba(108,140,255,.45); border: 1px solid rgba(108,140,255,.85);
+    transform: translate(-50%, -50%); pointer-events: none; }
+  .btn-ghost.on { background: rgba(108,140,255,.4); border-color: rgba(108,140,255,.85);
+    color: #fff; }
   .pad-btn { width: 64px; height: 64px; border-radius: 50%; background: rgba(20,26,46,.66);
     border: 1px solid var(--border); backdrop-filter: blur(8px); font-size: 20px;
     color: var(--text); touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -201,6 +210,7 @@
         <div class="sub" id="room-count"></div>
       </div>
       <div class="hud-actions">
+        <button id="btn-ghost" class="btn-ghost hidden" aria-pressed="false" title="Testerworld power: fly freely">Ghost</button>
         <button id="btn-menu" class="btn-ghost" aria-label="Open menu">⚙ Menu</button>
         <button id="btn-copy" class="btn-ghost">Copy invite link</button>
         <button id="btn-leave" class="btn-danger">Leave</button>
@@ -217,23 +227,24 @@
           <button id="btn-zoom-in" class="pill-btn" aria-label="Zoom in">+</button>
         </div>
         <div class="pill" id="slots">
-          <button class="slot sel zero" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"><span class="n">0</span></button>
-          <button class="slot zero" data-tile="3" style="background:#57617e" aria-label="Place stone"><span class="n">0</span></button>
-          <button class="slot zero" data-tile="5" style="background:#8a6238" aria-label="Place wood"><span class="n">0</span></button>
-          <button class="slot zero" data-tile="7" style="background:#3f7a34" aria-label="Place leaves"><span class="n">0</span></button>
-          <button class="slot zero" data-tile="4" style="background:#a88428" aria-label="Place ore"><span class="n">0</span></button>
-          <button class="slot zero" data-tile="8" style="background:#3d4459" aria-label="Place slate"><span class="n">0</span></button>
-          <button class="slot zero" data-tile="9" style="background:#272b3b" aria-label="Place dark rock"><span class="n">0</span></button>
-          <button class="slot zero" data-tile="10" style="background:#15171f" aria-label="Place void rock"><span class="n">0</span></button>
+          <button class="slot sel hidden" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="3" style="background:#57617e" aria-label="Place stone"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="5" style="background:#8a6238" aria-label="Place wood"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="7" style="background:#3f7a34" aria-label="Place leaves"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="4" style="background:#a88428" aria-label="Place ore"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="8" style="background:#3d4459" aria-label="Place slate"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="9" style="background:#272b3b" aria-label="Place dark rock"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="10" style="background:#15171f" aria-label="Place void rock"><span class="n">0</span></button>
         </div>
       </div>
       <div class="hud-row">
-        <div class="pad">
+        <div class="pad" id="pad-l">
           <button id="btn-left" class="pad-btn" aria-label="Move left">◀</button>
           <button id="btn-right" class="pad-btn" aria-label="Move right">▶</button>
         </div>
+        <div id="joy" class="hidden" aria-label="Fly joystick"><div id="joy-knob"></div></div>
         <button id="btn-mute" class="mic-btn" aria-label="Mute"><span class="mic-fill" id="mic-btn-fill"></span><span class="mic-ico"></span></button>
-        <div class="pad">
+        <div class="pad" id="pad-r">
           <button id="btn-jump" class="pad-btn jump" aria-label="Jump">JUMP</button>
         </div>
       </div>
@@ -249,11 +260,6 @@
         <label class="menu-row">
           <input type="checkbox" id="opt-autostep">
           <span>Auto-jump up 1-block steps while walking</span>
-        </label>
-        <!-- testerworld-only powers -->
-        <label class="menu-row hidden" id="row-ghost">
-          <input type="checkbox" id="opt-ghost">
-          <span>Ghost mode — fly freely, pass through anything (fly: Space up / S down)</span>
         </label>
       </div>
     </div>
@@ -293,7 +299,8 @@
     btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"),
     btnMenu: $("btn-menu"), btnMenuClose: $("btn-menu-close"),
     menuOverlay: $("menu-overlay"), optAutostep: $("opt-autostep"),
-    rowGhost: $("row-ghost"), optGhost: $("opt-ghost"),
+    btnGhost: $("btn-ghost"), padL: $("pad-l"), padR: $("pad-r"),
+    joy: $("joy"), joyKnob: $("joy-knob"),
   };
 
   const ICON_MIC_ON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
@@ -323,6 +330,16 @@
   let muted = false;
   let autoStep = true;         // Menu toggle: hop 1-block steps while walking
   let ghostOn = false;         // testerworld-only: fly through anything
+
+  // testerworld ghost toggle: swap walk pads ↔ fly joystick
+  function setGhost(on) {
+    ghostOn = on;
+    el.btnGhost.classList.toggle("on", on);
+    el.btnGhost.setAttribute("aria-pressed", on ? "1" : "0");
+    el.padL.classList.toggle("hidden", on);
+    el.padR.classList.toggle("hidden", on);
+    el.joy.classList.toggle("hidden", !on);
+  }
 
 
   // ── 3. shared audio context (mic test meter + voice level taps) ──
@@ -652,7 +669,7 @@
       autoStep = el.optAutostep.checked;
       localStorage.setItem("vr-autostep", autoStep ? "1" : "0");
     });
-    el.optGhost.addEventListener("change", () => { ghostOn = el.optGhost.checked; });
+    el.btnGhost.addEventListener("click", () => setGhost(!ghostOn));
 
     document.querySelectorAll(".slot").forEach((b) =>
       b.addEventListener("click", () => Game.setPalette(+b.dataset.tile)));
@@ -700,7 +717,7 @@
     const PW = 0.8, PH = 1.8;   // player box (m)
     const CH = 32;              // chunk size (tiles)
 
-    let world = { w: 10000, h: 2000, hear: 16, reach: 5 };
+    let world = { w: 10000, h: 4000, hear: 16, reach: 5 };
     let seed = 1;
 
     function hash2(x, y, s) {
@@ -738,7 +755,7 @@
       if (h === undefined) {
         const hills = fbm1(x / 140, seed, 3) - 0.5;
         const broad = fbm1(x / 800, seed + 7, 2) - 0.5;
-        h = clamp(Math.floor(130 + hills * 76 + broad * 140), 40, world.h - 60);
+        h = clamp(Math.floor(2000 + hills * 76 + broad * 140), 40, world.h - 60);
         hcache.set(x, h);
       }
       return h;
@@ -794,6 +811,7 @@
     const me = { x: 0, y: 0, vy: 0, grounded: false };
     const remotes = new Map(); // id -> { id, name, x, y, tx, ty }
     const input = { left: false, right: false, jump: false, down: false };
+    const joyVec = { x: 0, y: 0 };  // ghost-mode joystick, -1..1 each axis
     const SPD = 6.5, G = 34, JUMP = 12.2; // m/s, m/s², m/s — jump ≈ 2.2 m
     let lastTs = 0, acc = 0, raf = 0;
     let lastSend = 0, lastSentX = -1, lastSentY = -1;
@@ -801,12 +819,13 @@
     const canvas = el.gameCanvas;
     const ctx = canvas.getContext("2d");
 
-    // camera: pixels-per-meter, clamped between "fit whole depth" and 72
+    // camera: pixels-per-meter, clamped between "whole map fits" and 72
     let pxm = 48;
-    // max zoom-out = the FULL VERTICAL SPAN on screen at once: a band of sky
-    // above the grass, the whole 2000-deep world, lava glowing at the bottom
+    // max zoom-out = the WHOLE MAP on screen: all 10000 columns, full depth,
+    // a sky band above — centered vertically, lava filling any space below
     const SKY_TILES = 40; // sky band included at max zoom-out
-    const fitScale = () => window.innerHeight / (world.h + SKY_TILES);
+    const fitScale = () => Math.min(window.innerWidth / world.w,
+                                    window.innerHeight / (world.h + SKY_TILES));
     function zoomIn() { pxm = clamp(pxm * 1.5, fitScale(), 72); }
     function zoomOut() { pxm = clamp(pxm / 1.5, fitScale(), 72); }
 
@@ -819,11 +838,14 @@
     const DROP = { 1: T.DIRT };  // grass drops dirt; everything else drops itself
     function invAdd(v, n) { inv.set(v, (inv.get(v) || 0) + n); refreshSlots(); }
     function refreshSlots() {
+      let any = false;
       document.querySelectorAll(".slot").forEach((b) => {
         const n = inv.get(+b.dataset.tile) || 0;
         b.querySelector(".n").textContent = n;
-        b.classList.toggle("zero", n === 0);
+        b.classList.toggle("hidden", n === 0); // only what you've acquired
+        if (n > 0) any = true;
       });
+      $("slots").classList.toggle("hidden", !any); // no empty bar
     }
     function setPalette(v) {
       palette = v;
@@ -1219,13 +1241,13 @@
     // ── connection ──
     function start(workerUrl, roomName, name, identity) {
       myId = identity; myName = name; curRoom = roomName;
-      // testerworld unlocks extra powers (see the Menu); anywhere else
-      // they stay hidden and OFF
+      // testerworld unlocks extra powers (Ghost button in the top bar);
+      // anywhere else it stays hidden and OFF
       const tester = roomName === "testerworld";
-      el.rowGhost.classList.toggle("hidden", !tester);
-      ghostOn = false; el.optGhost.checked = false;
+      el.btnGhost.classList.toggle("hidden", !tester);
+      setGhost(false);
       document.querySelector(".keys-hint").textContent = tester
-        ? "A/D move · Space jump · LMB dig / RMB place · 1–8 pick · +/− zoom · ghost: Space/S fly up/down"
+        ? "A/D move · Space jump · LMB dig / RMB place · 1–8 pick · +/− zoom · ghost: Space/S or joystick"
         : "A/D move · Space jump · LMB dig / RMB place · dig blocks to collect them · 1–8 pick · +/− zoom";
       wsUrl = workerUrl.replace(/^http/, "ws") +
         "/ws?room=" + encodeURIComponent(roomName) +
@@ -1253,14 +1275,18 @@
     }
 
     function connectWs() {
-      try { ws = new WebSocket(wsUrl); }
+      let sock;
+      try { sock = new WebSocket(wsUrl); }
       catch (_) { scheduleRetry(); return; }
+      ws = sock;
 
-      ws.onopen = () => {
+      sock.onopen = () => {
+        if (ws !== sock) return;
         lastSentX = -1; lastSend = 0; // force an immediate position send
         setStatus(el.roomStatus, "", "");
       };
-      ws.onmessage = (ev) => {
+      sock.onmessage = (ev) => {
+        if (ws !== sock) return;
         let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
         if (m.t === "init") {
           world = m.world || world;
@@ -1291,13 +1317,15 @@
           setTileLocal(m.x, m.y, m.v);
         }
       };
-      ws.onclose = () => {
-        if (active) {
+      sock.onclose = () => {
+        // stale sockets (from a previous room / replaced connection) must not
+        // schedule a retry that would clobber the current session
+        if (active && ws === sock) {
           setStatus(el.roomStatus, "Game sync lost — retrying…", "err");
           scheduleRetry();
         }
       };
-      ws.onerror = () => { try { ws.close(); } catch (_) {} };
+      sock.onerror = () => { try { sock.close(); } catch (_) {} };
     }
     function scheduleRetry() {
       if (!active || reconnectTimer) return;
@@ -1320,9 +1348,11 @@
     function step(dt) {
       if (ghostOn) {
         // testerworld ghost: fly freely, ignore gravity & collision entirely
-        const vx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-        const vy = (input.down ? 1 : 0) - (input.jump ? 1 : 0);
-        const sp = 14; // tiles/s, diagonal included (no normalization needed)
+        let vx = (input.right ? 1 : 0) - (input.left ? 1 : 0) + joyVec.x;
+        let vy = (input.down ? 1 : 0) - (input.jump ? 1 : 0) + joyVec.y;
+        const m = Math.hypot(vx, vy);
+        if (m > 1) { vx /= m; vy /= m; }
+        const sp = 14; // tiles/s
         me.x = clamp(me.x + vx * sp * dt, 0, world.w - PW);
         me.y = clamp(me.y + vy * sp * dt, -80, world.h - PH);
         me.vy = 0; me.grounded = false; // airborne pose while flying
@@ -1516,7 +1546,7 @@
       camX = viewW >= world.w ? (world.w - viewW) / 2
         : clamp(me.x + PW / 2 - viewW / 2, 0, world.w - viewW);
       camY = viewH >= world.h + SKY_TILES
-        ? -(SKY_TILES + (viewH - world.h - SKY_TILES) / 2) // whole span: sky…lava
+        ? (world.h - viewH) / 2   // whole map visible → centered vertically
         : clamp(me.y + PH / 2 - viewH * 0.55, -SKY_TILES,
                 Math.max(-SKY_TILES, world.h - viewH));
 
@@ -1550,6 +1580,16 @@
       ctx.restore();
 
       if (!hasWorld) return;
+
+      // below the world bottom (visible at max zoom-out): lava, not void
+      if (camY + viewH > world.h) {
+        const gl2 = ctx.createLinearGradient(0, world.h, 0, camY + viewH);
+        gl2.addColorStop(0, "#e97a1f");   // matches the lava rows' glow
+        gl2.addColorStop(0.1, "#c2571a");
+        gl2.addColorStop(1, "#3d0e03");
+        ctx.fillStyle = gl2;
+        ctx.fillRect(camX - 1, world.h, viewW + 2, camY + viewH - world.h);
+      }
 
       if (pxm > 2) {
         // chunk canvases for the visible range (resolution follows zoom:
@@ -1780,7 +1820,9 @@
           input.jump = true; e.preventDefault();
         }
         else if (e.key >= "1" && e.key <= "8") {
-          const b = document.querySelectorAll(".slot")[+e.key - 1];
+          const vis = [...document.querySelectorAll(".slot")]
+            .filter((b) => !b.classList.contains("hidden"));
+          const b = vis[+e.key - 1];
           if (b) setPalette(+b.dataset.tile);
         }
         else if (e.key === "+" || e.key === "=") zoomIn();
@@ -1793,6 +1835,36 @@
       bindPad(el.btnLeft, "left");
       bindPad(el.btnRight, "right");
       bindPad(el.btnJump, "jump");
+
+      // ghost-mode joystick (testerworld): drag = fly that direction,
+      // deflection = speed. Replaces the walk pads while ghosting.
+      let joyPid = -1;
+      const JOY_R = 44; // px of max deflection
+      const joyMove = (e) => {
+        const r = el.joy.getBoundingClientRect();
+        let dx = e.clientX - (r.left + r.width / 2);
+        let dy = e.clientY - (r.top + r.height / 2);
+        const m = Math.hypot(dx, dy);
+        if (m > JOY_R) { dx *= JOY_R / m; dy *= JOY_R / m; }
+        joyVec.x = dx / JOY_R; joyVec.y = dy / JOY_R;
+        el.joyKnob.style.transform =
+          "translate(calc(-50% + " + dx + "px), calc(-50% + " + dy + "px))";
+      };
+      const joyReset = () => {
+        joyPid = -1; joyVec.x = 0; joyVec.y = 0;
+        el.joyKnob.style.transform = "translate(-50%, -50%)";
+      };
+      el.joy.addEventListener("pointerdown", (e) => {
+        if (!ghostOn || joyPid !== -1) return;
+        joyPid = e.pointerId;
+        try { el.joy.setPointerCapture(e.pointerId); } catch (_) {}
+        joyMove(e); e.preventDefault();
+      });
+      el.joy.addEventListener("pointermove", (e) => { if (e.pointerId === joyPid) joyMove(e); });
+      const joyUp = (e) => { if (e.pointerId === joyPid) joyReset(); };
+      el.joy.addEventListener("pointerup", joyUp);
+      el.joy.addEventListener("pointercancel", joyUp);
+      el.joy.addEventListener("touchstart", killTouchDefault, { passive: false });
 
       // kill long-press recognition (the tap-and-hold buzz) on the world view
       canvas.addEventListener("touchstart", killTouchDefault, { passive: false });

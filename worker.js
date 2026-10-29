@@ -37,7 +37,7 @@ const STALE_MS = 30000;
 // ── World constants (KEEP IN SYNC with index.html) ────────────────
 const WORLD = {
   w: 10000,     // tiles wide (1 tile = 1 m)
-  h: 2000,      // tiles deep
+  h: 4000,      // tiles deep — surface sits in the middle (~y 2000)
   hear: 16,     // proximity voice range = 20 player widths (0.8 m)
   reach: 5,     // dig/place reach in tiles
   spawnX: 5000, // everyone spawns near world center → always in earshot
@@ -84,7 +84,7 @@ function fbm2(x, y, seed, oct) {
 function heightAt(seed, x) { // y of the surface (grass) row; y grows down
   const hills = fbm1(x / 140, seed, 3) - 0.5;
   const broad = fbm1(x / 800, seed + 7, 2) - 0.5;
-  return clamp(Math.floor(130 + hills * 76 + broad * 140), 40, WORLD.h - 60);
+  return clamp(Math.floor(2000 + hills * 76 + broad * 140), 40, WORLD.h - 60);
 }
 // trees: one per 9-column bucket (bucket hash picks position & trunk
 // height), so trunks never touch. None near spawn.
