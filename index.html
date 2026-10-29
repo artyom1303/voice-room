@@ -872,9 +872,16 @@
       if (per) return per;
       per = [];
       for (let vi = 0; vi < 4; vi++) {
+        const img = bakeTexVariant(v, vi);
+        // average color of the 16×16 texture → the overview map's pixel.
+        // Summed during the one-time bake, so it costs nothing per frame.
+        let ar = 0, ag = 0, ab = 0;
+        const dd = img.data;
+        for (let i = 0; i < dd.length; i += 4) { ar += dd[i]; ag += dd[i + 1]; ab += dd[i + 2]; }
+        const n = dd.length / 4;
         const c16 = document.createElement("canvas");
         c16.width = c16.height = 16;
-        c16.getContext("2d").putImageData(bakeTexVariant(v, vi), 0, 0);
+        c16.getContext("2d").putImageData(img, 0, 0);
         const res = [c16];
         for (const s of [8, 4]) { // downscaled twins for far-zoom chunks
           const c = document.createElement("canvas");
@@ -884,7 +891,7 @@
           g.drawImage(c16, 0, 0, s, s);
           res.push(c);
         }
-        per.push(res);
+        per.push({ res, avg: [ar / n, ag / n, ab / n] });
       }
       texCache[v] = per;
       return per;
@@ -892,7 +899,13 @@
     function tileTexFor(v, wx, wy, res) {
       const per = texVariants(v);
       const vi = (hash2(wx, wy, 7) * per.length) | 0;
-      return per[vi][res === 16 ? 0 : res === 8 ? 1 : 2];
+      return per[vi].res[res === 16 ? 0 : res === 8 ? 1 : 2];
+    }
+    // the block's own average texture color — used for its overview pixel,
+    // so the zoomed-out map is literally the average of the zoomed-in art
+    function blockAvgColor(v, wx, wy) {
+      const per = texVariants(v);
+      return per[(hash2(wx, wy, 7) * per.length) | 0].avg;
     }
 
     function paintTile(g2, lx, ly, v, wx, wy, res) {
@@ -960,8 +973,6 @@
     // inside a frame budget, into 2048-wide tile canvases (stays under
     // mobile canvas-size limits). Live edits patch single pixels.
     const OVTW = 2048;
-    const OVCOL = { 1: [99, 163, 71], 2: [134, 95, 60], 3: [127, 127, 127],
-                    4: [232, 185, 61], 5: [107, 74, 42], 6: [61, 61, 61] };
     let ovTiles = [];   // [{ canvas, ctx, x0, w }]
     let ovBuiltCol = 0; // world columns baked so far
     function buildOverview() {
@@ -1000,12 +1011,12 @@
               else v = T.STONE;
             }
             const i = (y * w + ox) * 4;
-            const j = (hash2(x, y, 53) - 0.5) * 14;
             if (v === T.AIR) { // cave hole: dark wall
-              d[i] = 16 + j * 0.4; d[i + 1] = 20 + j * 0.4; d[i + 2] = 32 + j * 0.4;
-            } else {
-              const c = OVCOL[v];
-              d[i] = c[0] + j; d[i + 1] = c[1] + j; d[i + 2] = c[2] + j;
+              const j = (hash2(x, y, 53) - 0.5) * 6;
+              d[i] = 16 + j; d[i + 1] = 20 + j; d[i + 2] = 32 + j;
+            } else { // pixel = the block's own average texture color
+              const c = blockAvgColor(v, x, y);
+              d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2];
             }
             d[i + 3] = 255;
           }
@@ -1032,8 +1043,8 @@
       if (v === T.AIR && wy < heightAt(wx)) t.ctx.clearRect(wx - t.x0, wy, 1, 1);
       else if (v === T.AIR) { t.ctx.fillStyle = "#101420"; t.ctx.fillRect(wx - t.x0, wy, 1, 1); }
       else {
-        const c = OVCOL[v] || [255, 0, 255];
-        t.ctx.fillStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+        const c = blockAvgColor(v, wx, wy);
+        t.ctx.fillStyle = "rgb(" + (c[0] | 0) + "," + (c[1] | 0) + "," + (c[2] | 0) + ")";
         t.ctx.fillRect(wx - t.x0, wy, 1, 1);
       }
     }
@@ -1315,8 +1326,10 @@
         ctx.imageSmoothingEnabled = true;
         bakeOverviewSome();
         for (const t of ovTiles) ctx.drawImage(t.canvas, t.x0, 0, t.w, world.h);
-        for (const r of remotes.values()) drawDot(r);
-        drawDot({ x: me.x, y: me.y, name: myName }, true);
+        // players shrink naturally with the world (no dot stand-in);
+        // drawPlayer's own detail gate hides face/name at tiny scales
+        for (const r of remotes.values()) drawPlayer(r, false);
+        drawPlayer({ id: myId, name: myName, x: me.x, y: me.y }, true);
         return;
       }
 
@@ -1341,12 +1354,6 @@
         }
         ctx.stroke();
       }
-    }
-
-    function drawDot(p, isMe) {
-      const r = 4 / pxm; // constant ~4 px on screen
-      ctx.fillStyle = isMe ? "#ffffff" : "hsl(" + hueFor(p.name) + " 72% 68%)";
-      ctx.beginPath(); ctx.arc(p.x + PW / 2, p.y + PH / 2, r, 0, 7); ctx.fill();
     }
 
     // ── player avatars: little humans ──
@@ -1411,13 +1418,14 @@
       const sw = walking ? Math.sin(an.ph) : 0;
       const liftL = Math.max(0, sw) * 0.1, liftR = Math.max(0, -sw) * 0.1;
 
-      // legs + shoes (alternate lift while walking)
+      // legs + shoes (alternate lift while walking) — soles end exactly at
+      // the physics box bottom (PH), so the feet sit flush on the ground
       ctx.fillStyle = pants;
-      ctx.fillRect(x + 0.16, y + 1.10, 0.22, 0.54 - liftL);
-      ctx.fillRect(x + 0.42, y + 1.10, 0.22, 0.54 - liftR);
+      ctx.fillRect(x + 0.16, y + 1.10, 0.22, 0.56 - liftL);
+      ctx.fillRect(x + 0.42, y + 1.10, 0.22, 0.56 - liftR);
       ctx.fillStyle = "#232839";
-      ctx.fillRect(x + 0.14, y + 1.64 - liftL, 0.26, 0.14);
-      ctx.fillRect(x + 0.40, y + 1.64 - liftR, 0.26, 0.14);
+      ctx.fillRect(x + 0.14, y + 1.66 - liftL, 0.26, 0.14);
+      ctx.fillRect(x + 0.40, y + 1.66 - liftR, 0.26, 0.14);
 
       // ── arm angles: pendulum swings hanging exactly from the shoulders ──
       // Walk: arms swing in OPPOSITE phase, each against its same-side leg.
@@ -1441,13 +1449,16 @@
 
       // torso, with one arm BEHIND it and the other IN FRONT, swapping with
       // facing: facing right → LEFT arm in front, facing left → RIGHT arm.
-      // Arm pivots are exactly the torso's top corners.
-      if (an.face > 0) drawArm(x + 0.68, y + 0.62, sleeve, an.armR);
-      else drawArm(x + 0.12, y + 0.62, sleeve, an.armL);
+      // Arm pivots are exactly the torso's top corners. An arm RAISED above
+      // the neck (|angle| > 1.5, e.g. mid-chop) skips the queue and is drawn
+      // LAST — in front of the head, never hidden behind it.
+      const raisedL = Math.abs(an.armL) > 1.5, raisedR = Math.abs(an.armR) > 1.5;
+      if (an.face > 0) { if (!raisedR) drawArm(x + 0.68, y + 0.62, sleeve, an.armR); }
+      else { if (!raisedL) drawArm(x + 0.12, y + 0.62, sleeve, an.armL); }
       ctx.fillStyle = shirt;
       ctx.fillRect(x + 0.12, y + 0.62, 0.56, 0.52);
-      if (an.face > 0) drawArm(x + 0.12, y + 0.62, sleeve, an.armL);
-      else drawArm(x + 0.68, y + 0.62, sleeve, an.armR);
+      if (an.face > 0) { if (!raisedL) drawArm(x + 0.12, y + 0.62, sleeve, an.armL); }
+      else { if (!raisedR) drawArm(x + 0.68, y + 0.62, sleeve, an.armR); }
 
       // head + hair
       ctx.fillStyle = SKIN;
@@ -1480,6 +1491,11 @@
           ctx.fillText(p.name, x + PW / 2, y - 0.14);
         }
       }
+
+      // raised arms (hand above the neck, e.g. mid-chop) go in FRONT of
+      // the head — a lifted hand must never disappear behind the face
+      if (raisedL) drawArm(x + 0.12, y + 0.62, sleeve, an.armL);
+      if (raisedR) drawArm(x + 0.68, y + 0.62, sleeve, an.armR);
     }
 
     // ── proximity voice: element volume = f(distance), 0 at world.hear ──
@@ -1617,7 +1633,7 @@
         me, remotes, meAnim, get world() { return world; }, get seed() { return seed; },
         get pxm() { return pxm; }, getTile, tileAt: (x, y) => tileAt(x, y),
         heightAt, overlay, mine,
-        setTile: (x, y, v) => setTileLocal(x, y, v),
+        setTile: (x, y, v) => setTileLocal(x, y, v), blockAvgColor,
         get camX() { return camX; }, get camY() { return camY; },
         get ovTiles() { return ovTiles; }, get ovBuiltCol() { return ovBuiltCol; },
         get ovMode() { return pxm <= 2; },
