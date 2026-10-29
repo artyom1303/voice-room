@@ -100,6 +100,17 @@
   .hud-card h1 { font-size: 17px; word-break: break-all; }
   .hud-card .sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
   .hud-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .menu-overlay { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+    background: rgba(5,8,18,.55); backdrop-filter: blur(4px); }
+  .menu-overlay.hidden { display: none; }
+  .menu-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 16px 18px; width: min(340px, calc(100vw - 40px)); box-shadow: 0 18px 50px rgba(0,0,0,.5); }
+  .menu-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .menu-head h2 { font-size: 17px; }
+  .menu-head .pill-btn { width: 32px; height: 32px; }
+  .menu-row { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer;
+    padding: 8px 0; user-select: none; }
+  .menu-row input { width: 20px; height: 20px; accent-color: var(--good); flex-shrink: 0; cursor: pointer; }
   .hud-status { position: fixed; top: 76px; left: 0; right: 0; z-index: 5;
     pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.7); }
   .hud-bottom { bottom: 0; padding: 12px 14px 14px; flex-direction: column; gap: 10px; align-items: stretch; }
@@ -190,6 +201,7 @@
         <div class="sub" id="room-count"></div>
       </div>
       <div class="hud-actions">
+        <button id="btn-menu" class="btn-ghost" aria-label="Open menu">⚙ Menu</button>
         <button id="btn-copy" class="btn-ghost">Copy invite link</button>
         <button id="btn-leave" class="btn-danger">Leave</button>
       </div>
@@ -221,6 +233,20 @@
         <div class="pad">
           <button id="btn-jump" class="pad-btn jump" aria-label="Jump">JUMP</button>
         </div>
+      </div>
+    </div>
+
+    <!-- in-game menu (⚙ in the top bar) -->
+    <div id="menu-overlay" class="menu-overlay hidden">
+      <div class="menu-card">
+        <div class="menu-head">
+          <h2>Menu</h2>
+          <button id="btn-menu-close" class="pill-btn" aria-label="Close menu">✕</button>
+        </div>
+        <label class="menu-row">
+          <input type="checkbox" id="opt-autostep">
+          <span>Auto-jump up 1-block steps while walking</span>
+        </label>
       </div>
     </div>
   </main>
@@ -257,6 +283,8 @@
     gameCanvas: $("game-canvas"), audioOut: $("audio-out"),
     btnLeft: $("btn-left"), btnRight: $("btn-right"), btnJump: $("btn-jump"),
     btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"),
+    btnMenu: $("btn-menu"), btnMenuClose: $("btn-menu-close"),
+    menuOverlay: $("menu-overlay"), optAutostep: $("opt-autostep"),
   };
 
   const ICON_MIC_ON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
@@ -284,6 +312,7 @@
   let localAudioTrack = null;  // published LiveKit mic track
   let testStream = null;       // mic-test stream (pre-join only)
   let muted = false;
+  let autoStep = true;         // Menu toggle: hop 1-block steps while walking
 
 
   // ── 3. shared audio context (mic test meter + voice level taps) ──
@@ -600,6 +629,19 @@
     el.btnLeave.addEventListener("click", onLeave);
     el.btnZoomIn.addEventListener("click", Game.zoomIn);
     el.btnZoomOut.addEventListener("click", Game.zoomOut);
+
+    // ── in-game menu ──
+    el.btnMenu.addEventListener("click", () => el.menuOverlay.classList.remove("hidden"));
+    el.btnMenuClose.addEventListener("click", () => el.menuOverlay.classList.add("hidden"));
+    el.menuOverlay.addEventListener("click", (e) => {
+      if (e.target === el.menuOverlay) el.menuOverlay.classList.add("hidden");
+    });
+    autoStep = localStorage.getItem("vr-autostep") !== "0"; // default ON
+    el.optAutostep.checked = autoStep;
+    el.optAutostep.addEventListener("change", () => {
+      autoStep = el.optAutostep.checked;
+      localStorage.setItem("vr-autostep", autoStep ? "1" : "0");
+    });
 
     document.querySelectorAll(".slot").forEach((b) =>
       b.addEventListener("click", () => Game.setPalette(+b.dataset.tile)));
@@ -969,6 +1011,18 @@
       reconnectTimer = setTimeout(() => { reconnectTimer = 0; if (active) connectWs(); }, 2000);
     }
 
+    // auto-step (Menu toggle): walking into a 1-block step while grounded
+    // hops up it (~1.3 m) — but only if every row above the step is clear,
+    // so a real wall (2+ blocks) still stops you
+    function tryAutoStep(tx) {
+      if (!autoStep || !me.grounded) return;
+      const botRow = Math.floor(me.y + PH - 1e-6);
+      if (!solid(tx, botRow)) return;                 // step must be at foot level
+      for (let r = Math.floor(me.y) - 1; r < botRow; r++)
+        if (solid(tx, r)) return;                     // taller than 1 → wall, no hop
+      me.vy = -9.4; me.grounded = false;              // ~1.3 m hop
+    }
+
     // ── physics (own block only): AABB vs tile grid ──
     function step(dt) {
       const vx = (input.right ? SPD : 0) - (input.left ? SPD : 0);
@@ -980,12 +1034,12 @@
       if (vx > 0) {
         const tx = Math.floor(me.x + PW);
         for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + PH - 1e-6); ty++) {
-          if (solid(tx, ty)) { me.x = tx - PW - 1e-4; break; }
+          if (solid(tx, ty)) { me.x = tx - PW - 1e-4; tryAutoStep(tx); break; }
         }
       } else if (vx < 0) {
         const tx = Math.floor(me.x);
         for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + PH - 1e-6); ty++) {
-          if (solid(tx, ty)) { me.x = tx + 1; break; }
+          if (solid(tx, ty)) { me.x = tx + 1; tryAutoStep(tx); break; }
         }
       }
       me.x = clamp(me.x, 0, world.w - PW);
@@ -1194,6 +1248,26 @@
     }
     const meAnim = { px: 0, ph: 0, face: 1 }; // own avatar's walk/facing state
 
+    // one arm, hanging from EXACTLY its shoulder point, rotated by ang —
+    // the sleeve starts a hair above the pivot so rotation never opens a gap
+    function drawArm(sx, sy, sleeveColor, ang) {
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(ang);
+      ctx.fillStyle = sleeveColor;
+      ctx.fillRect(-0.06, -0.02, 0.12, 0.36);
+      ctx.fillStyle = SKIN;
+      ctx.fillRect(-0.06, 0.34, 0.12, 0.10); // hand
+      ctx.restore();
+    }
+
+    // is a REMOTE player's feet on (or just above) solid ground? used for
+    // the airborne pose — the local player just uses me.grounded instead
+    function feetOnGround(p) {
+      const fy = Math.floor(p.y + PH + 0.02);
+      return solid(Math.floor(p.x + 0.15), fy) || solid(Math.floor(p.x + PW - 0.15), fy);
+    }
+
     function drawPlayer(p, isMe) {
       const hue = hueFor(p.name || "?");
       const shirt = "hsl(" + hue + " 72% 68%)";
@@ -1219,22 +1293,36 @@
       ctx.fillRect(x + 0.14, y + 1.64 - liftL, 0.26, 0.14);
       ctx.fillRect(x + 0.40, y + 1.64 - liftR, 0.26, 0.14);
 
-      // torso + arms + hands (sleeves echo the player's name-hue).
-      // Arms SWING: each pivots around its shoulder like a pendulum,
-      // sweeping sideways with the walk cycle instead of bobbing up/down.
+      // ── arm angles: pendulum swings hanging exactly from the shoulders ──
+      // Walk: arms swing in OPPOSITE phase, each against its same-side leg.
+      // Airborne: a separate pose — both arms raise out to the sides.
+      // Digging/placing: the arm on the target side chops. All eased (no pop).
+      const nowT = performance.now();
+      const adt = an.at ? Math.min((nowT - an.at) / 1000, 0.1) : 0.016;
+      an.at = nowT;
+      const air = isMe ? !me.grounded : !feetOnGround(p);
+      let tL = an.face * sw * 0.55, tR = -an.face * sw * 0.55;
+      if (air) {
+        const flap = 0.08 * Math.sin(nowT / 130);
+        tL = 0.65 + flap; tR = -0.65 - flap;   // out to the sides
+      }
+      // digging chops only with a real target in reach; placing always swings
+      const working = isMe && mine.held && mine.pid !== -1 &&
+        (mine.action === "place" || mine.tx >= 0);
+      if (working) {
+        const c = 1.15 + 0.5 * Math.sin(nowT / 80); // chop toward the target
+        if (mine.wx >= x + PW / 2) tR = -c; else tL = c;
+      }
+      an.armL = (an.armL || 0) + (tL - (an.armL || 0)) * Math.min(1, adt * 14);
+      an.armR = (an.armR || 0) + (tR - (an.armR || 0)) * Math.min(1, adt * 14);
+
+      // torso, with one arm BEHIND it and the other IN FRONT — swaps with facing
+      if (an.face > 0) drawArm(x + 0.08, y + 0.63, sleeve, an.armL);
+      else drawArm(x + 0.72, y + 0.63, sleeve, an.armR);
       ctx.fillStyle = shirt;
       ctx.fillRect(x + 0.12, y + 0.62, 0.56, 0.52);
-      const armA = sw * 0.5; // swing angle in radians, from the walk cycle
-      for (const side of [-1, 1]) {
-        ctx.save();
-        ctx.translate(x + (side < 0 ? 0.08 : 0.72), y + 0.68); // shoulder pivot
-        ctx.rotate(armA);
-        ctx.fillStyle = sleeve;
-        ctx.fillRect(-0.06, 0, 0.12, 0.34);
-        ctx.fillStyle = SKIN;
-        ctx.fillRect(-0.06, 0.34, 0.12, 0.10); // hand
-        ctx.restore();
-      }
+      if (an.face > 0) drawArm(x + 0.72, y + 0.63, sleeve, an.armR);
+      else drawArm(x + 0.08, y + 0.63, sleeve, an.armL);
 
       // head + hair
       ctx.fillStyle = SKIN;
@@ -1401,7 +1489,7 @@
       hasWorld: () => hasWorld,
       remoteCount: () => remotes.size,
       _debug: {
-        me, remotes, get world() { return world; }, get seed() { return seed; },
+        me, remotes, meAnim, get world() { return world; }, get seed() { return seed; },
         get pxm() { return pxm; }, getTile, tileAt: (x, y) => tileAt(x, y),
         heightAt, overlay, mine,
         get camX() { return camX; }, get camY() { return camY; },
