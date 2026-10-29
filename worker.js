@@ -94,16 +94,18 @@ function treeCol(seed, c) { // is there a trunk at column c?
   if (hash2(b, 0, seed + 91) > 0.55) return false;
   return c === b * 9 + 1 + ((hash2(b, 1, seed + 92) * 7) | 0);
 }
-function trunkH(seed, c) { return 3 + ((hash2(c, 2, seed + 95) * 3) | 0); } // 3–5
+function trunkH(seed, c) { return 4 + ((hash2(c, 2, seed + 95) * 3) | 0); } // 4–6
 function treeAt(seed, x, y) { // sky band only: trunk / crown, else AIR
-  for (let c = x - 2; c <= x + 2; c++) {
+  for (let c = x - 3; c <= x + 3; c++) {
     if (!treeCol(seed, c)) continue;
     const hc = heightAt(seed, c), top = hc - trunkH(seed, c);
-    if (y < top - 2 || y >= hc) continue;
-    if (x === c && y >= top) return T_WOOD;
+    if (x === c && y >= top && y < hc) return T_WOOD;   // trunk
+    if (y < top - 2 || y > top + 1) continue;           // crown = 4 tidy rows
     const dx = Math.abs(x - c), dy = y - top;
-    const r = dy <= -2 ? 1 : dy <= 0 ? 2 : 1;
-    if (dx <= r && hash2(x, y, seed + 97) > 0.18) return T_LEAVES;
+    const R = 2 + ((hash2(c, 3, seed + 98) * 2) | 0);   // crown radius 2 or 3
+    if (dy === -2 || dy === 1) { if (dx > 1) continue; }
+    else if (dx > R || (dx === R && R === 3 && dy === -1)) continue; // round top corners
+    return T_LEAVES;
   }
   return T_AIR;
 }
@@ -111,7 +113,7 @@ function tileAt(seed, x, y) {
   x |= 0; y |= 0;
   if (y < 0) return T_AIR;
   if (x < 0 || x >= WORLD.w) return T_BEDROCK; // side walls
-  if (y >= WORLD.h - 3) return T_LAVA;         // glowing lava floor
+  if (y >= WORLD.h - 8) return T_LAVA;         // glowing lava floor
   const h = heightAt(seed, x);
   if (y < h) return treeAt(seed, x, y);        // sky band: trees or air
   const d = y - h;
