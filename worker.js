@@ -45,10 +45,11 @@ const WORLD = {
 const PW = 0.8, PH = 1.8; // player collision box (m)
 
 // Tile types
-const T_AIR = 0, T_GRASS = 1, T_DIRT = 2, T_STONE = 3, T_ORE = 4, T_WOOD = 5, T_BEDROCK = 6;
-// Seconds to mine per type (bedrock = unbreakable)
-const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1 };
-const PLACEABLE = { 2: 1, 3: 1, 5: 1 };
+const T_AIR = 0, T_GRASS = 1, T_DIRT = 2, T_STONE = 3, T_ORE = 4, T_WOOD = 5, T_BEDROCK = 6,
+      T_LEAVES = 7, T_ROCK2 = 8, T_ROCK3 = 9, T_ROCK4 = 10, T_LAVA = 11;
+// Seconds to mine per type (bedrock/lava = unbreakable, not in the table)
+const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1, 7: 0.3, 8: 3.2, 9: 5.5, 10: 9 };
+const PLACEABLE = { 2: 1, 3: 1, 4: 1, 5: 1, 7: 1, 8: 1, 9: 1, 10: 1 };
 
 // ── Deterministic terrain (KEEP IN SYNC with index.html) ──────────
 function hash2(x, y, seed) {
@@ -85,18 +86,44 @@ function heightAt(seed, x) { // y of the surface (grass) row; y grows down
   const broad = fbm1(x / 800, seed + 7, 2) - 0.5;
   return clamp(Math.floor(130 + hills * 76 + broad * 140), 40, WORLD.h - 60);
 }
+// trees: one per 9-column bucket (bucket hash picks position & trunk
+// height), so trunks never touch. None near spawn.
+function treeCol(seed, c) { // is there a trunk at column c?
+  if (Math.abs(c - WORLD.spawnX) < 8) return false;
+  const b = Math.floor(c / 9);
+  if (hash2(b, 0, seed + 91) > 0.55) return false;
+  return c === b * 9 + 1 + ((hash2(b, 1, seed + 92) * 7) | 0);
+}
+function trunkH(seed, c) { return 3 + ((hash2(c, 2, seed + 95) * 3) | 0); } // 3–5
+function treeAt(seed, x, y) { // sky band only: trunk / crown, else AIR
+  for (let c = x - 2; c <= x + 2; c++) {
+    if (!treeCol(seed, c)) continue;
+    const hc = heightAt(seed, c), top = hc - trunkH(seed, c);
+    if (y < top - 2 || y >= hc) continue;
+    if (x === c && y >= top) return T_WOOD;
+    const dx = Math.abs(x - c), dy = y - top;
+    const r = dy <= -2 ? 1 : dy <= 0 ? 2 : 1;
+    if (dx <= r && hash2(x, y, seed + 97) > 0.18) return T_LEAVES;
+  }
+  return T_AIR;
+}
 function tileAt(seed, x, y) {
   x |= 0; y |= 0;
   if (y < 0) return T_AIR;
-  if (x < 0 || x >= WORLD.w || y >= WORLD.h) return T_BEDROCK;
-  if (y === WORLD.h - 1) return T_BEDROCK; // unbreakable world floor
+  if (x < 0 || x >= WORLD.w) return T_BEDROCK; // side walls
+  if (y >= WORLD.h - 3) return T_LAVA;         // glowing lava floor
   const h = heightAt(seed, x);
-  if (y < h) return T_AIR;
+  if (y < h) return treeAt(seed, x, y);        // sky band: trees or air
   const d = y - h;
   if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T_AIR; // caves
   if (d === 0) return T_GRASS;
   if (d < 5) return T_DIRT;
   if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T_ORE;
+  // rock grows harder & darker with depth — perlin-wobbled boundaries
+  const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
+  if (dd > 900) return T_ROCK4;
+  if (dd > 480) return T_ROCK3;
+  if (dd > 190) return T_ROCK2;
   return T_STONE;
 }
 
@@ -347,7 +374,7 @@ export class GameRoom {
       const x = m.x | 0, y = m.y | 0;
       if (x < 0 || y < 0 || x >= WORLD.w || y >= WORLD.h) return;
       const v = this.effective(x, y);
-      if (v === T_AIR || v === T_BEDROCK || !this.inReach(p, x, y)) { this.correct(ws, x, y); return; }
+      if (v === T_AIR || v === T_BEDROCK || v === T_LAVA || !this.inReach(p, x, y)) { this.correct(ws, x, y); return; }
       const now = Date.now();
       if (now - p.lastBreak < (HARD[v] || 1) * 800) { this.correct(ws, x, y); return; } // too fast
       p.lastBreak = now;

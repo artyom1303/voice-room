@@ -121,9 +121,12 @@
   .pill-btn { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,.08);
     border: 1px solid var(--border); color: var(--text); font-size: 18px; line-height: 1;
     display: grid; place-items: center; padding: 0; }
-  .slot { width: 34px; height: 34px; border-radius: 9px; border: 2px solid rgba(255,255,255,.18);
+  .slot { position: relative; width: 34px; height: 34px; border-radius: 9px; border: 2px solid rgba(255,255,255,.18);
     padding: 0; flex-shrink: 0; }
   .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
+  .slot .n { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: 700;
+    color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9); pointer-events: none; }
+  .slot.zero { opacity: .38; }
 
   .pad { display: flex; gap: 10px; }
   .pad-btn { width: 64px; height: 64px; border-radius: 50%; background: rgba(20,26,46,.66);
@@ -205,7 +208,7 @@
     </div>
 
     <p id="room-status" class="status hud-status"></p>
-    <div class="keys-hint">A/D move · Space jump · LMB dig · RMB place · 1–3 block · +/− zoom</div>
+    <div class="keys-hint">A/D move · Space jump · LMB dig / RMB place · dig blocks to collect them · 1–8 pick · +/− zoom</div>
 
     <div class="hud hud-bottom">
       <div class="hud-row">
@@ -213,10 +216,15 @@
           <button id="btn-zoom-out" class="pill-btn" aria-label="Zoom out">−</button>
           <button id="btn-zoom-in" class="pill-btn" aria-label="Zoom in">+</button>
         </div>
-        <div class="pill">
-          <button class="slot sel" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"></button>
-          <button class="slot" data-tile="3" style="background:#57617e" aria-label="Place stone"></button>
-          <button class="slot" data-tile="5" style="background:#8a6238" aria-label="Place wood"></button>
+        <div class="pill" id="slots">
+          <button class="slot sel zero" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"><span class="n">0</span></button>
+          <button class="slot zero" data-tile="3" style="background:#57617e" aria-label="Place stone"><span class="n">0</span></button>
+          <button class="slot zero" data-tile="5" style="background:#8a6238" aria-label="Place wood"><span class="n">0</span></button>
+          <button class="slot zero" data-tile="7" style="background:#3f7a34" aria-label="Place leaves"><span class="n">0</span></button>
+          <button class="slot zero" data-tile="4" style="background:#a88428" aria-label="Place ore"><span class="n">0</span></button>
+          <button class="slot zero" data-tile="8" style="background:#3d4459" aria-label="Place slate"><span class="n">0</span></button>
+          <button class="slot zero" data-tile="9" style="background:#272b3b" aria-label="Place dark rock"><span class="n">0</span></button>
+          <button class="slot zero" data-tile="10" style="background:#15171f" aria-label="Place void rock"><span class="n">0</span></button>
         </div>
       </div>
       <div class="hud-row">
@@ -676,8 +684,11 @@
      ═══════════════════════════════════════════════════════════════ */
   const Game = (() => {
     // ── tiles & terrain (KEEP IN SYNC with worker.js) ──
-    const T = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, ORE: 4, WOOD: 5, BEDROCK: 6 };
-    const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1 }; // seconds to mine
+    const T = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, ORE: 4, WOOD: 5, BEDROCK: 6,
+                LEAVES: 7, ROCK2: 8, ROCK3: 9, ROCK4: 10, LAVA: 11 };
+    // seconds to mine — rock gets harder the deeper you go; lava/bedrock
+    // are not in the table = unbreakable
+    const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1, 7: 0.3, 8: 3.2, 9: 5.5, 10: 9 };
     const PW = 0.8, PH = 1.8;   // player box (m)
     const CH = 32;              // chunk size (tiles)
 
@@ -724,18 +735,45 @@
       }
       return h;
     }
+    // trees: one per 9-column bucket (bucket hash picks position & trunk
+    // height), so trunks never touch. Trunk = WOOD, crown = LEAVES blob.
+    // None near spawn, so you never materialize inside a trunk.
+    function treeCol(c) { // is there a trunk at column c?
+      if (Math.abs(c - (world.spawnX || 5000)) < 8) return false;
+      const b = Math.floor(c / 9);
+      if (hash2(b, 0, seed + 91) > 0.55) return false;
+      return c === b * 9 + 1 + ((hash2(b, 1, seed + 92) * 7) | 0);
+    }
+    function trunkH(c) { return 3 + ((hash2(c, 2, seed + 95) * 3) | 0); } // 3–5
+    function treeAt(x, y) { // sky band only: trunk / crown, else AIR
+      for (let c = x - 2; c <= x + 2; c++) {
+        if (!treeCol(c)) continue;
+        const hc = heightAt(c), top = hc - trunkH(c);
+        if (y < top - 2 || y >= hc) continue;
+        if (x === c && y >= top) return T.WOOD;
+        const dx = Math.abs(x - c), dy = y - top;
+        const r = dy <= -2 ? 1 : dy <= 0 ? 2 : 1;
+        if (dx <= r && hash2(x, y, seed + 97) > 0.18) return T.LEAVES;
+      }
+      return T.AIR;
+    }
     function tileAt(x, y) {
       x |= 0; y |= 0;
       if (y < 0) return T.AIR;
-      if (x < 0 || x >= world.w || y >= world.h) return T.BEDROCK;
-      if (y === world.h - 1) return T.BEDROCK; // unbreakable world floor
+      if (x < 0 || x >= world.w) return T.BEDROCK; // side walls
+      if (y >= world.h - 3) return T.LAVA;         // glowing lava floor
       const h = heightAt(x);
-      if (y < h) return T.AIR;
+      if (y < h) return treeAt(x, y);              // sky band: trees or air
       const d = y - h;
       if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T.AIR; // caves
       if (d === 0) return T.GRASS;
       if (d < 5) return T.DIRT;
       if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T.ORE;
+      // rock grows harder & darker with depth — perlin-wobbled boundaries
+      const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
+      if (dd > 900) return T.ROCK4;
+      if (dd > 480) return T.ROCK3;
+      if (dd > 190) return T.ROCK2;
       return T.STONE;
     }
 
@@ -760,8 +798,20 @@
     function zoomOut() { pxm = clamp(pxm / 1.5, fitScale(), 72); }
 
     // tools: mouse uses LMB dig / RMB place; touch taps a block to dig it
-    // or taps air to build there — the palette picks which block gets built
+    // or taps air to build there — the palette picks which block gets built.
+    // INVENTORY: you start with NOTHING — blocks come from digging them
+    // (grass gives dirt). Slot badges show how many you hold.
     let palette = T.DIRT;
+    const inv = new Map();       // tile -> count held
+    const DROP = { 1: T.DIRT };  // grass drops dirt; everything else drops itself
+    function invAdd(v, n) { inv.set(v, (inv.get(v) || 0) + n); refreshSlots(); }
+    function refreshSlots() {
+      document.querySelectorAll(".slot").forEach((b) => {
+        const n = inv.get(+b.dataset.tile) || 0;
+        b.querySelector(".n").textContent = n;
+        b.classList.toggle("zero", n === 0);
+      });
+    }
     function setPalette(v) {
       palette = v;
       document.querySelectorAll(".slot").forEach((b) =>
@@ -813,10 +863,23 @@
       stoneDark: [95, 95, 100],
       ore: [[232, 185, 61], [245, 215, 110], [210, 160, 45]],
       bark: [[107, 74, 42], [93, 63, 36], [117, 82, 46], [85, 56, 32]],
-      barkDark: [68, 45, 26],
+      barkDark: [68, 45, 26], barkHi: [136, 99, 57],
+      leaf: [[64, 124, 52], [74, 138, 58], [56, 112, 46], [86, 150, 66]],
+      leafDark: [38, 74, 34], leafHi: [104, 168, 76],
+      rock2: [[88, 90, 104], [80, 82, 96], [96, 98, 112], [74, 76, 90]],
+      rock2Dark: [58, 60, 72],
+      rock3: [[58, 58, 68], [52, 52, 62], [64, 64, 76], [46, 46, 56]],
+      rock3Dark: [36, 36, 44],
+      rock4: [[34, 32, 40], [27, 26, 33], [38, 36, 45], [23, 22, 29]],
+      rock4Dark: [16, 15, 20],
+      lava: [[242, 110, 24], [255, 140, 30], [226, 86, 16]],
+      lavaHi: [255, 214, 92], lavaCrust: [122, 44, 12],
       bed: [[86, 86, 86], [46, 46, 46], [61, 61, 61], [107, 107, 107]],
     };
     const pick = (arr, r) => arr[Math.min(arr.length - 1, (r * arr.length) | 0)];
+    const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t | 0,
+                               a[1] + (b[1] - a[1]) * t | 0,
+                               a[2] + (b[2] - a[2]) * t | 0];
 
     function bakeTexVariant(v, vi) {
       const S = 16;
@@ -839,9 +902,32 @@
           c = r2 < 0.08 ? MCP.dirtDark : r2 < 0.14 ? MCP.pebble : pick(MCP.dirt, r);
         } else if (v === T.STONE || v === T.ORE) {
           c = r2 < 0.07 ? MCP.stoneDark : pick(MCP.stone, r);
+        } else if (v === T.ROCK2 || v === T.ROCK3 || v === T.ROCK4) {
+          // deeper = darker, more cracked
+          const P = v === T.ROCK2 ? MCP.rock2 : v === T.ROCK3 ? MCP.rock3 : MCP.rock4;
+          const DK = v === T.ROCK2 ? MCP.rock2Dark : v === T.ROCK3 ? MCP.rock3Dark : MCP.rock4Dark;
+          const crack = v !== T.ROCK2 && R(x, y >> 1, 43) < (v === T.ROCK4 ? 0.11 : 0.06);
+          c = crack || r2 < 0.07 ? DK : pick(P, r);
+        } else if (v === T.LAVA) {
+          // glowing: molten orange with hot yellow-white bubbles + dark crust
+          const flow = Math.sin((x * 2 + y * 3) * Math.PI / 8) * 0.5 + 0.5; // wraps (tilable)
+          if (r2 > 0.90) c = MCP.lavaHi;
+          else if (r2 < 0.09) c = MCP.lavaCrust;
+          else c = pick(MCP.lava, clamp(flow * 0.55 + r * 0.45, 0, 0.999));
+        } else if (v === T.LEAVES) {
+          const cl = R(x >> 1, y >> 1, 37); // 2×2 clumps read as foliage
+          c = cl < 0.16 ? MCP.leafDark : cl > 0.88 ? MCP.leafHi : pick(MCP.leaf, r);
         } else if (v === T.WOOD) {
-          const groove = R(x, 0, 41) < 0.22;                // vertical bark grooves
-          c = groove ? MCP.barkDark : pick(MCP.bark, r2 < 0.12 ? r2 : r);
+          // SEAMLESS vertical bark: every pattern term completes whole cycles
+          // across the 16 px, so the tile wraps perfectly in both directions,
+          // and a single variant makes every wood block identical.
+          const wob = 1.4 * Math.sin(y * Math.PI / 8) + 0.6 * Math.sin(y * Math.PI / 4 + 1.7);
+          const band = Math.sin((x + wob) * Math.PI / 4);        // 8-px stripes
+          const ridge = Math.sin((x + wob * 0.5) * Math.PI / 2); // 4-px ridges
+          const grain = (Math.sin((x * 3 + y * 2) * Math.PI / 8)
+                       + Math.sin((x - y * 5) * Math.PI / 8)) * 0.5; // speckle
+          const t01 = clamp(0.52 + band * 0.24 + ridge * 0.10 + grain * 0.09, 0, 1);
+          c = band < -0.68 ? MCP.barkDark : mixc(MCP.barkDark, MCP.barkHi, t01);
         } else { // BEDROCK: chunky 2×2 blotches
           c = pick(MCP.bed, hash2((x >> 1) + vi * 13, (y >> 1) + vi * 7, 51));
         }
@@ -855,13 +941,16 @@
               set(Math.min(S - 1, cx + dx), Math.min(S - 1, cy + dy), pick(MCP.ore, R(dx, dy, k + 91)));
         }
       }
-      // soft bevel so neighbours read as separate blocks (no drawn grid)
-      for (let i = 0; i < S; i++) {
-        for (const [x, y, f] of [[i, 0, 1.10], [i, S - 1, 0.88], [0, i, 1.05], [S - 1, i, 0.94]]) {
-          const j = (y * S + x) * 4;
-          d[j] = clamp(d[j] * f, 0, 255);
-          d[j + 1] = clamp(d[j + 1] * f, 0, 255);
-          d[j + 2] = clamp(d[j + 2] * f, 0, 255);
+      // soft bevel so neighbours read as separate blocks (no drawn grid) —
+      // EXCEPT wood & leaves, which must flow seamlessly (trunks, canopies)
+      if (v !== T.WOOD && v !== T.LEAVES) {
+        for (let i = 0; i < S; i++) {
+          for (const [x, y, f] of [[i, 0, 1.10], [i, S - 1, 0.88], [0, i, 1.05], [S - 1, i, 0.94]]) {
+            const j = (y * S + x) * 4;
+            d[j] = clamp(d[j] * f, 0, 255);
+            d[j + 1] = clamp(d[j + 1] * f, 0, 255);
+            d[j + 2] = clamp(d[j + 2] * f, 0, 255);
+          }
         }
       }
       return img;
@@ -871,7 +960,7 @@
       let per = texCache[v];
       if (per) return per;
       per = [];
-      for (let vi = 0; vi < 4; vi++) {
+      for (let vi = 0; vi < (v === T.WOOD ? 1 : 4); vi++) { // wood: ONE shared bark
         const img = bakeTexVariant(v, vi);
         // average color of the 16×16 texture → the overview map's pixel.
         // Summed during the one-time bake, so it costs nothing per frame.
@@ -908,18 +997,42 @@
       return per[(hash2(wx, wy, 7) * per.length) | 0].avg;
     }
 
+    // big smooth patches of colour across the world (perlin, not per-block
+    // hash): broad ~90-block brightness drift + medium detail + a slow
+    // warm/cool drift. Applied once per tile at CHUNK-BAKE time (and per
+    // pixel at overview-bake time), so it costs nothing per frame.
+    function worldTint(wx, wy) {
+      const a = fbm2(wx / 90, wy / 90, seed + 77, 2);
+      const b = fbm2(wx / 29, wy / 29, seed + 78, 2);
+      const w = fbm2(wx / 150, wy / 150, seed + 79, 2) - 0.5;
+      const br = 0.88 + a * 0.20 + (b - 0.5) * 0.10;   // ≈ ×0.85 … ×1.10
+      return [br * (1 + w * 0.07), br, br * (1 - w * 0.07)];
+    }
+
     function paintTile(g2, lx, ly, v, wx, wy, res) {
       const px = lx * res, py = ly * res;
       g2.clearRect(px, py, res, res);
       if (v === T.AIR) {
-        if (wy >= heightAt(wx)) { // underground: dark "wall" behind air
-          const j = hash2(wx, wy, 17);
-          g2.fillStyle = "hsl(228 26% " + (9 + j * 4) + "%)";
+        if (wy >= heightAt(wx)) { // underground: dark "wall" behind air…
+          if (getTile(wx, wy + 1) === T.LAVA) {
+            const j = hash2(wx, wy, 17);   // …unless lava glows below
+            g2.fillStyle = "hsl(18 82% " + (15 + j * 9) + "%)";
+          } else {
+            const j = hash2(wx, wy, 17);
+            g2.fillStyle = "hsl(228 26% " + (9 + j * 4) + "%)";
+          }
           g2.fillRect(px, py, res, res);
         }
         return;
       }
       g2.drawImage(tileTexFor(v, wx, wy, res), px, py);
+      const tn = worldTint(wx, wy); // global perlin colour drift
+      g2.globalCompositeOperation = "multiply";
+      g2.fillStyle = "rgb(" + (clamp(tn[0], 0, 1.2) * 255 | 0) + "," +
+                            (clamp(tn[1], 0, 1.2) * 255 | 0) + "," +
+                            (clamp(tn[2], 0, 1.2) * 255 | 0) + ")";
+      g2.fillRect(px, py, res, res);
+      g2.globalCompositeOperation = "source-over";
     }
 
     function touchLRU(k) {
@@ -962,6 +1075,15 @@
         if (c) paintTile(c.getContext("2d"), wx - cx * CH, wy - cy * CH, v, wx, wy, res);
       }
       patchOverview(wx, wy);
+      // the air tile ABOVE carries lava glow → it depends on this tile too
+      if (getTile(wx, wy - 1) === T.AIR && wy > 0) {
+        const cy2 = Math.floor((wy - 1) / CH), cx2 = Math.floor(wx / CH);
+        for (const res of TEXRES) {
+          const c = chunkTex.get(cx2 + "," + cy2 + "," + res);
+          if (c) paintTile(c.getContext("2d"), wx - cx2 * CH, wy - 1 - cy2 * CH, T.AIR, wx, wy - 1, res);
+        }
+        patchOverview(wx, wy - 1);
+      }
     }
     function setTileLocal(x, y, v) {
       overlay.set(x + "," + y, v);
@@ -988,7 +1110,7 @@
     function bakeOverviewSlice(cols) {
       const c0 = ovBuiltCol, c1 = Math.min(world.w, c0 + cols);
       if (c0 >= c1) return;
-      const H = world.h, lastRow = world.h - 1;
+      const H = world.h;
       for (const t of ovTiles) {
         const s0 = Math.max(c0, t.x0), s1 = Math.min(c1, t.x0 + t.w);
         if (s0 >= s1) continue;
@@ -998,26 +1120,24 @@
         for (let x = s0; x < s1; x++) {
           const hh = heightAt(x), ox = x - s0;
           for (let y = 0; y < H; y++) {
-            // tileAt() inlined for speed — must stay in sync with it
-            let v;
-            if (y === lastRow) v = T.BEDROCK;
-            else if (y < hh) continue;                  // sky → transparent
-            else {
-              const dep = y - hh;
-              if (dep > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) v = T.AIR;
-              else if (dep === 0) v = T.GRASS;
-              else if (dep < 5) v = T.DIRT;
-              else if (hash2(x, y, seed ^ 0x9e37) < (dep > 200 ? 0.03 : 0.02)) v = T.ORE;
-              else v = T.STONE;
+            if (y < hh - 9) continue;      // high sky (above any crown) → transparent
+            const v = tileAt(x, y);        // single source of truth: trees,
+            if (v === T.AIR) {             // caves, layers, lava all included
+              if (y < hh) continue;        // sky around trees → transparent
+              const i = (y * w + ox) * 4;  // cave hole: dark wall, lava-lit from below
+              if (tileAt(x, y + 1) === T.LAVA) {
+                d[i] = 200; d[i + 1] = 66; d[i + 2] = 14;
+              } else {
+                const j = (hash2(x, y, 53) - 0.5) * 6;
+                d[i] = 16 + j; d[i + 1] = 20 + j; d[i + 2] = 32 + j;
+              }
+              d[i + 3] = 255;
+              continue;
             }
+            // pixel = the block's own average texture color × world tint
             const i = (y * w + ox) * 4;
-            if (v === T.AIR) { // cave hole: dark wall
-              const j = (hash2(x, y, 53) - 0.5) * 6;
-              d[i] = 16 + j; d[i + 1] = 20 + j; d[i + 2] = 32 + j;
-            } else { // pixel = the block's own average texture color
-              const c = blockAvgColor(v, x, y);
-              d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2];
-            }
+            const c = blockAvgColor(v, x, y), tn = worldTint(x, y);
+            d[i] = c[0] * tn[0]; d[i + 1] = c[1] * tn[1]; d[i + 2] = c[2] * tn[2];
             d[i + 3] = 255;
           }
         }
@@ -1034,17 +1154,20 @@
     function bakeOverviewSome() { // bake within a frame budget
       if (ovBuiltCol >= world.w) return;
       const t0 = performance.now();
-      do { bakeOverviewSlice(64); }
+      do { bakeOverviewSlice(32); }
       while (ovBuiltCol < world.w && performance.now() - t0 < 20);
     }
     function paintOvPixel(wx, wy, v) {
       const t = ovTiles[(wx / OVTW) | 0];
       if (!t || wx < 0 || wx >= world.w || wy < 0 || wy >= world.h) return;
-      if (v === T.AIR && wy < heightAt(wx)) t.ctx.clearRect(wx - t.x0, wy, 1, 1);
-      else if (v === T.AIR) { t.ctx.fillStyle = "#101420"; t.ctx.fillRect(wx - t.x0, wy, 1, 1); }
-      else {
-        const c = blockAvgColor(v, wx, wy);
-        t.ctx.fillStyle = "rgb(" + (c[0] | 0) + "," + (c[1] | 0) + "," + (c[2] | 0) + ")";
+      if (v === T.AIR && wy < heightAt(wx) && getTile(wx, wy - 1) !== T.LAVA)
+        t.ctx.clearRect(wx - t.x0, wy, 1, 1);
+      else if (v === T.AIR) {
+        t.ctx.fillStyle = tileAt(wx, wy + 1) === T.LAVA ? "#c8420e" : "#101420";
+        t.ctx.fillRect(wx - t.x0, wy, 1, 1);
+      } else {
+        const c = blockAvgColor(v, wx, wy), tn = worldTint(wx, wy);
+        t.ctx.fillStyle = "rgb(" + (c[0] * tn[0] | 0) + "," + (c[1] * tn[1] | 0) + "," + (c[2] * tn[2] | 0) + ")";
         t.ctx.fillRect(wx - t.x0, wy, 1, 1);
       }
     }
@@ -1063,7 +1186,7 @@
       active = true; hasWorld = false;
       overlay.clear(); chunkData.clear(); chunkTex.clear(); lru.length = 0; lruBytes = 0;
       hcache.clear(); ovTiles = []; ovBuiltCol = 0;
-      pxm = 48; setPalette(T.DIRT);
+      pxm = 48; inv.clear(); refreshSlots(); setPalette(T.DIRT);
       mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0;
       wireInput();
       connectWs();
@@ -1195,6 +1318,7 @@
         } else {
           mine.prog += dt / (HARD[getTile(mine.tx, mine.ty)] || 1);
           if (mine.prog >= 1) {
+            invAdd(DROP[getTile(mine.tx, mine.ty)] || getTile(mine.tx, mine.ty), 1);
             setTileLocal(mine.tx, mine.ty, T.AIR); // optimistic; server confirms
             if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "dig", x: mine.tx, y: mine.ty }));
             mine.prog = 0;
@@ -1239,14 +1363,16 @@
     }
     function validDigTarget(tx, ty) {
       const v = getTile(tx, ty);
-      return v !== T.AIR && v !== T.BEDROCK && inReach(tx, ty);
+      return v !== T.AIR && v !== T.BEDROCK && v !== T.LAVA && inReach(tx, ty);
     }
     function tryPlace(tx, ty) {
+      if ((inv.get(palette) || 0) <= 0) return; // you can only place what you dug
       if (getTile(tx, ty) !== T.AIR || !inReach(tx, ty)) return;
       const hit = (p) => tx < p.x + PW && tx + 1 > p.x && ty < p.y + PH && ty + 1 > p.y;
       if (hit(me)) return;
       for (const r of remotes.values()) if (hit(r)) return;
       setTileLocal(tx, ty, palette); // optimistic; server confirms
+      invAdd(palette, -1);
       if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: palette }));
     }
     function tileFromEvent(e) {
@@ -1276,6 +1402,31 @@
       applyProximity();
     }
 
+    // starry sky: one cached 256x256 tile of hash-placed stars, drawn
+    // tiled in screen space with slow parallax (cheaper than per-frame
+    // star loops, and identical across machines via hash2)
+    let _starCv = null;
+    function starTile() {
+      if (_starCv) return _starCv;
+      const c = document.createElement("canvas");
+      c.width = 256; c.height = 256;
+      const x2 = c.getContext("2d");
+      for (let i = 0; i < 130; i++) {
+        const sx = (hash2(i, 3, seed + 501) * 256) | 0;
+        const sy = (hash2(i, 5, seed + 502) * 256) | 0;
+        const br = hash2(i, 7, seed + 503);
+        const big = br > 0.86; // few bright 2-px stars, rest are 1-px
+        const fade = 1 - (sy / 256) * 0.65; // dimmer near the horizon
+        const a = (0.35 + br * 0.65) * fade;
+        const warm = hash2(i, 9, seed + 504);
+        x2.fillStyle = warm > 0.8 ? "rgba(255,236,200," + a + ")"
+          : warm > 0.6 ? "rgba(200,220,255," + a + ")"
+          : "rgba(255,255,255," + a + ")";
+        x2.fillRect(sx, sy, big ? 2 : 1, big ? 2 : 1);
+      }
+      _starCv = c; return c;
+    }
+
     function render() {
       const dpr = window.devicePixelRatio || 1;
       const cw = window.innerWidth, ch = window.innerHeight;
@@ -1293,6 +1444,17 @@
       const g = ctx.createLinearGradient(0, 0, 0, ch);
       g.addColorStop(0, "#0d1531"); g.addColorStop(0.7, "#24305c"); g.addColorStop(1, "#3a4a80");
       ctx.fillStyle = g; ctx.fillRect(0, 0, cw, ch);
+
+      // stars — tiled, parallax against camera, crisp (no smoothing)
+      {
+        const st = starTile();
+        const sox = ((-camX * pxm * 0.25) % 256 + 256) % 256;
+        const soy = ((-camY * pxm * 0.10) % 256 + 256) % 256;
+        ctx.imageSmoothingEnabled = false;
+        for (let sx = sox - 256; sx < cw; sx += 256)
+          for (let sy = soy - 256; sy < ch; sy += 256)
+            ctx.drawImage(st, sx, sy);
+      }
 
       // world space
       ctx.setTransform(dpr * pxm, 0, 0, dpr * pxm, -camX * dpr * pxm, -camY * dpr * pxm);
@@ -1323,7 +1485,8 @@
       } else {
         // fully zoomed out (1 block = 2 px or less): the 1-px-per-block
         // overview — real terrain WITH caves, baked progressively
-        ctx.imageSmoothingEnabled = true;
+        // overview — crisp block pixels, no smoothing
+        ctx.imageSmoothingEnabled = false;
         bakeOverviewSome();
         for (const t of ovTiles) ctx.drawImage(t.canvas, t.x0, 0, t.w, world.h);
         // players shrink naturally with the world (no dot stand-in);
@@ -1529,9 +1692,10 @@
         else if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
           input.jump = true; e.preventDefault();
         }
-        else if (e.key === "1") setPalette(T.DIRT);
-        else if (e.key === "2") setPalette(T.STONE);
-        else if (e.key === "3") setPalette(T.WOOD);
+        else if (e.key >= "1" && e.key <= "8") {
+          const b = document.querySelectorAll(".slot")[+e.key - 1];
+          if (b) setPalette(+b.dataset.tile);
+        }
         else if (e.key === "+" || e.key === "=") zoomIn();
         else if (e.key === "-") zoomOut();
       });
@@ -1637,6 +1801,7 @@
         get camX() { return camX; }, get camY() { return camY; },
         get ovTiles() { return ovTiles; }, get ovBuiltCol() { return ovBuiltCol; },
         get ovMode() { return pxm <= 2; },
+        inv, T,
       },
     };
   })();
