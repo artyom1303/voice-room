@@ -1248,16 +1248,17 @@
     }
     const meAnim = { px: 0, ph: 0, face: 1 }; // own avatar's walk/facing state
 
-    // one arm, hanging from EXACTLY its shoulder point, rotated by ang —
-    // the sleeve starts a hair above the pivot so rotation never opens a gap
+    // one arm, rotated by ang around the shoulder: the rectangle's
+    // TOP-MIDDLE sits exactly on the torso's top corner — no overlap
+    // margin — and sleeve + hand = torso height (0.52) exactly
     function drawArm(sx, sy, sleeveColor, ang) {
       ctx.save();
       ctx.translate(sx, sy);
       ctx.rotate(ang);
       ctx.fillStyle = sleeveColor;
-      ctx.fillRect(-0.06, -0.02, 0.12, 0.36);
+      ctx.fillRect(-0.06, 0, 0.12, 0.42);
       ctx.fillStyle = SKIN;
-      ctx.fillRect(-0.06, 0.34, 0.12, 0.10); // hand
+      ctx.fillRect(-0.06, 0.42, 0.12, 0.10); // hand
       ctx.restore();
     }
 
@@ -1280,7 +1281,14 @@
       const an = isMe ? meAnim : (p._an || (p._an = { px: x, ph: 0, face: 1 }));
       const dx = x - an.px; an.px = x;
       if (dx > 0.002) an.face = 1; else if (dx < -0.002) an.face = -1;
-      const walking = Math.abs(dx) > 0.003;
+      // airborne: me = the real physics flag, remotes = feet-on-solid probe
+      const air = isMe ? !me.grounded : !feetOnGround(p);
+      // digging / placing turns you to FACE the target
+      const working = isMe && mine.held && mine.pid !== -1 &&
+        (mine.action === "place" || mine.tx >= 0);
+      if (working) an.face = (mine.wx >= x + PW / 2) ? 1 : -1;
+      // no walking while airborne — legs stay straight
+      const walking = Math.abs(dx) > 0.003 && !air;
       an.ph = walking ? an.ph + Math.abs(dx) * 4.5 : 0;
       const sw = walking ? Math.sin(an.ph) : 0;
       const liftL = Math.max(0, sw) * 0.1, liftR = Math.max(0, -sw) * 0.1;
@@ -1300,15 +1308,11 @@
       const nowT = performance.now();
       const adt = an.at ? Math.min((nowT - an.at) / 1000, 0.1) : 0.016;
       an.at = nowT;
-      const air = isMe ? !me.grounded : !feetOnGround(p);
       let tL = an.face * sw * 0.55, tR = -an.face * sw * 0.55;
       if (air) {
         const flap = 0.08 * Math.sin(nowT / 130);
         tL = 0.65 + flap; tR = -0.65 - flap;   // out to the sides
       }
-      // digging chops only with a real target in reach; placing always swings
-      const working = isMe && mine.held && mine.pid !== -1 &&
-        (mine.action === "place" || mine.tx >= 0);
       if (working) {
         const c = 1.15 + 0.5 * Math.sin(nowT / 80); // chop toward the target
         if (mine.wx >= x + PW / 2) tR = -c; else tL = c;
@@ -1316,13 +1320,15 @@
       an.armL = (an.armL || 0) + (tL - (an.armL || 0)) * Math.min(1, adt * 14);
       an.armR = (an.armR || 0) + (tR - (an.armR || 0)) * Math.min(1, adt * 14);
 
-      // torso, with one arm BEHIND it and the other IN FRONT — swaps with facing
-      if (an.face > 0) drawArm(x + 0.08, y + 0.63, sleeve, an.armL);
-      else drawArm(x + 0.72, y + 0.63, sleeve, an.armR);
+      // torso, with one arm BEHIND it and the other IN FRONT, swapping with
+      // facing: facing right → LEFT arm in front, facing left → RIGHT arm.
+      // Arm pivots are exactly the torso's top corners.
+      if (an.face > 0) drawArm(x + 0.68, y + 0.62, sleeve, an.armR);
+      else drawArm(x + 0.12, y + 0.62, sleeve, an.armL);
       ctx.fillStyle = shirt;
       ctx.fillRect(x + 0.12, y + 0.62, 0.56, 0.52);
-      if (an.face > 0) drawArm(x + 0.72, y + 0.63, sleeve, an.armR);
-      else drawArm(x + 0.08, y + 0.63, sleeve, an.armL);
+      if (an.face > 0) drawArm(x + 0.12, y + 0.62, sleeve, an.armL);
+      else drawArm(x + 0.68, y + 0.62, sleeve, an.armR);
 
       // head + hair
       ctx.fillStyle = SKIN;
