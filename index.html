@@ -138,10 +138,30 @@
     transform: translate(-50%, -50%); pointer-events: none; }
   .btn-ghost.on { background: rgba(108,140,255,.4); border-color: rgba(108,140,255,.85);
     color: #fff; }
-  .pill-btn.wide { width: auto; border-radius: 99px; padding: 0 13px;
-    font-size: 12.5px; font-weight: 650; white-space: nowrap; }
-  .pill-btn.on { background: rgba(108,140,255,.4); border-color: rgba(108,140,255,.85);
+  /* layer toggle: a simple compact round button, the word fitted inside */
+  #btn-layer { width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+    padding: 0; background: rgba(20,26,46,.66); border: 1px solid var(--border);
+    backdrop-filter: blur(8px); color: var(--text);
+    font-size: 10.5px; font-weight: 700; letter-spacing: .2px; }
+  #btn-layer.on { background: rgba(108,140,255,.45); border-color: rgba(108,140,255,.9);
     color: #fff; }
+  .menu-btn { width: 100%; margin-top: 8px; text-align: center; }
+  /* crafting book */
+  .craft-card { width: min(400px, calc(100vw - 40px)); max-height: 72dvh; overflow-y: auto; }
+  .craft-sub { font-size: 12.5px; color: var(--muted); margin: -4px 0 4px; }
+  .craft-cur { font-size: 13px; color: var(--good); margin-bottom: 4px; }
+  .craft-row { display: flex; align-items: center; gap: 10px; padding: 10px 0;
+    border-top: 1px solid var(--border); }
+  .craft-info { flex: 1; min-width: 0; }
+  .craft-name { font-size: 14px; font-weight: 650; }
+  .craft-speed { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+  .craft-cost { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .craft-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
+    background: rgba(255,255,255,.06); border: 1px solid var(--border);
+    border-radius: 99px; padding: 2px 8px 2px 4px; }
+  .craft-chip .sw { width: 12px; height: 12px; border-radius: 4px; }
+  .craft-chip.lack { color: var(--bad); border-color: rgba(255,107,107,.4); }
+  .craft-btn { width: auto; padding: 9px 14px; font-size: 13px; flex-shrink: 0; }
   .pad-btn { width: 64px; height: 64px; border-radius: 50%; background: rgba(20,26,46,.66);
     border: 1px solid var(--border); backdrop-filter: blur(8px); font-size: 20px;
     color: var(--text); touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -216,13 +236,11 @@
       <div class="hud-actions">
         <button id="btn-ghost" class="btn-ghost hidden" aria-pressed="false" title="Testerworld power: fly freely">Ghost</button>
         <button id="btn-menu" class="btn-ghost" aria-label="Open menu">⚙ Menu</button>
-        <button id="btn-copy" class="btn-ghost">Copy invite link</button>
-        <button id="btn-leave" class="btn-danger">Leave</button>
       </div>
     </div>
 
     <p id="room-status" class="status hud-status"></p>
-    <div class="keys-hint">A/D move · Space jump · LMB dig / RMB place · Q front/back layer · dig blocks to collect them · 1–8 pick · +/− zoom</div>
+    <div class="keys-hint">A/D move · Space jump · LMB dig / RMB place · Q layer · C craft · dig blocks to collect them · 1–0 pick · +/− zoom</div>
 
     <div class="hud hud-bottom">
       <div class="hud-row">
@@ -230,17 +248,18 @@
           <button id="btn-zoom-out" class="pill-btn" aria-label="Zoom out">−</button>
           <button id="btn-zoom-in" class="pill-btn" aria-label="Zoom in">+</button>
         </div>
-        <div class="pill">
-          <button id="btn-layer" class="pill-btn wide" aria-pressed="false"
-                  title="Dig &amp; build in the walk-through back layer (Q)">⧉ Front</button>
-        </div>
+        <button id="btn-layer" aria-pressed="false"
+                title="Dig &amp; build in the walk-through back layer (Q)">Front</button>
         <div class="pill" id="slots">
           <button class="slot sel hidden" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"><span class="n">0</span></button>
           <button class="slot hidden" data-tile="3" style="background:#57617e" aria-label="Place stone"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="12" style="background:#b87333" aria-label="Place copper"><span class="n">0</span></button>
           <button class="slot hidden" data-tile="5" style="background:#8a6238" aria-label="Place wood"><span class="n">0</span></button>
           <button class="slot hidden" data-tile="7" style="background:#3f7a34" aria-label="Place leaves"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="4" style="background:#a88428" aria-label="Place ore"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="13" style="background:#b6aea2" aria-label="Place iron"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="4" style="background:#a88428" aria-label="Place gold"><span class="n">0</span></button>
           <button class="slot hidden" data-tile="8" style="background:#3d4459" aria-label="Place slate"><span class="n">0</span></button>
+          <button class="slot hidden" data-tile="14" style="background:#4ec3d8" aria-label="Place diamond"><span class="n">0</span></button>
           <button class="slot hidden" data-tile="9" style="background:#272b3b" aria-label="Place dark rock"><span class="n">0</span></button>
           <button class="slot hidden" data-tile="10" style="background:#15171f" aria-label="Place void rock"><span class="n">0</span></button>
         </div>
@@ -269,6 +288,22 @@
           <input type="checkbox" id="opt-autostep">
           <span>Auto-jump up 1-block steps while walking</span>
         </label>
+        <button id="btn-craft" class="btn-ghost menu-btn">Crafting book</button>
+        <button id="btn-copy" class="btn-ghost menu-btn">Copy invite link</button>
+        <button id="btn-leave" class="btn-danger menu-btn">Leave room</button>
+      </div>
+    </div>
+
+    <!-- crafting book (from the menu, or C) -->
+    <div id="craft-overlay" class="menu-overlay hidden">
+      <div class="menu-card craft-card">
+        <div class="menu-head">
+          <h2>Crafting book</h2>
+          <button id="btn-craft-close" class="pill-btn" aria-label="Close crafting book">✕</button>
+        </div>
+        <p class="craft-sub">Pickaxes dig faster. Costs are paid from your block inventory.</p>
+        <p class="craft-cur" id="craft-cur"></p>
+        <div id="craft-list"></div>
       </div>
     </div>
   </main>
@@ -308,6 +343,8 @@
     btnMenu: $("btn-menu"), btnMenuClose: $("btn-menu-close"),
     menuOverlay: $("menu-overlay"), optAutostep: $("opt-autostep"),
     btnLayer: $("btn-layer"),
+    btnCraft: $("btn-craft"), craftOverlay: $("craft-overlay"),
+    btnCraftClose: $("btn-craft-close"), craftList: $("craft-list"), craftCur: $("craft-cur"),
     btnGhost: $("btn-ghost"), padL: $("pad-l"), padR: $("pad-r"),
     joy: $("joy"), joyKnob: $("joy-knob"),
   };
@@ -643,7 +680,7 @@
     let n = 0;
     if (Game.isActive() && Game.hasWorld()) n = 1 + Game.remoteCount();
     else if (room) n = 1 + room.remoteParticipants.size;
-    if (n > 0) el.roomCount.textContent = n + (n === 1 ? " person" : " people") + " in room";
+    if (n > 0) el.roomCount.textContent = "👤 " + n;
   }
 
   function init() {
@@ -672,6 +709,11 @@
     el.btnMenuClose.addEventListener("click", () => el.menuOverlay.classList.add("hidden"));
     el.menuOverlay.addEventListener("click", (e) => {
       if (e.target === el.menuOverlay) el.menuOverlay.classList.add("hidden");
+    });
+    el.btnCraft.addEventListener("click", Game.toggleCraft);
+    el.btnCraftClose.addEventListener("click", Game.toggleCraft);
+    el.craftOverlay.addEventListener("click", (e) => {
+      if (e.target === el.craftOverlay) Game.toggleCraft();
     });
     autoStep = localStorage.getItem("vr-autostep") !== "0"; // default ON
     el.optAutostep.checked = autoStep;
@@ -712,20 +754,27 @@
 
      Mining: hold on a tile — it chips at the block's hardness rate;
      release or wander out of reach and the damage heals back.
-     Desktop: LMB dig · RMB place · Q toggles front/back layer · 1–8 pick.
-     Touch: tap a block to dig it, tap air to build there — the ⧉ button
-     picks the layer. BACK layer: darker, walk-through; terrain always
-     has a back wall, and tree trunks live entirely in the back.
+     Desktop: LMB dig · RMB place · Q toggles front/back layer · 1–0 pick.
+     Touch: tap a block to dig it, tap air to build there — the round
+     Front/Back button picks the layer. The layer is ABSOLUTE (no
+     autoswitch): back selected → tap empty back = build, occupied back
+     = break; same for front. BACK layer: darker, walk-through; terrain
+     always has a back wall (breakable), and tree trunks live entirely
+     in the back. Ores per rock layer — copper in stone, iron in rock2,
+     gold in rock3, diamond in rock4 — and the crafting book (menu or C)
+     turns them into pickaxes that mine faster.
 
      Proximity voice: volume = 1 − |Δx| / world.hear.
      ═══════════════════════════════════════════════════════════════ */
   const Game = (() => {
     // ── tiles & terrain (KEEP IN SYNC with worker.js) ──
     const T = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, ORE: 4, WOOD: 5, BEDROCK: 6,
-                LEAVES: 7, ROCK2: 8, ROCK3: 9, ROCK4: 10, LAVA: 11 };
-    // seconds to mine — rock gets harder the deeper you go; lava/bedrock
-    // are not in the table = unbreakable
-    const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1, 7: 0.3, 8: 3.2, 9: 5.5, 10: 9 };
+                LEAVES: 7, ROCK2: 8, ROCK3: 9, ROCK4: 10, LAVA: 11,
+                COPPER: 12, IRON: 13, DIAMOND: 14 }; // ORE = gold
+    // seconds to mine (before pickaxe speed) — rock gets harder the deeper
+    // you go; lava/bedrock are not in the table = unbreakable
+    const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1, 7: 0.3, 8: 3.2, 9: 5.5, 10: 9,
+                   12: 2.0, 13: 3.4, 14: 5.0 };
     const PW = 0.8, PH = 1.8;   // player box (m)
     const CH = 32;              // chunk size (tiles)
 
@@ -812,13 +861,15 @@
       if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T.AIR; // caves
       if (d === 0) return T.GRASS;
       if (d < 5) return T.DIRT;
-      if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T.ORE;
-      // rock grows harder & darker with depth — perlin-wobbled boundaries
+      // rock grows harder & darker with depth — perlin-wobbled boundaries —
+      // and each rock layer carries its own ore: copper in stone, iron in
+      // slate, gold in dark rock, diamond in void rock
       const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
-      if (dd > 900) return T.ROCK4;
-      if (dd > 480) return T.ROCK3;
-      if (dd > 190) return T.ROCK2;
-      return T.STONE;
+      const or = hash2(x, y, seed ^ 0x9e37);
+      if (dd > 900) return or < 0.020 ? T.DIAMOND : T.ROCK4;
+      if (dd > 480) return or < 0.025 ? T.ORE : T.ROCK3;
+      if (dd > 190) return or < 0.025 ? T.IRON : T.ROCK2;
+      return or < 0.025 ? T.COPPER : T.STONE;
     }
 
     // ── natural BACK layer (KEEP IN SYNC with worker.js) ──
@@ -835,7 +886,7 @@
       if (y < h) return trunkAt(x, y);           // sky band: just trunks
       const d = y - h;
       if (d < 5) return T.DIRT;                  // dirt wall behind grass too
-      if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T.ORE;
+      // walls are plain strata — no ore in the back layer
       const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
       if (dd > 900) return T.ROCK4;
       if (dd > 480) return T.ROCK3;
@@ -865,8 +916,16 @@
     const SKY_TILES = 40; // sky band included at max zoom-out
     const fitScale = () => Math.min(window.innerWidth / world.w,
                                     window.innerHeight / (world.h + SKY_TILES));
-    function zoomIn() { pxm = clamp(pxm * 1.5, fitScale(), 72); }
-    function zoomOut() { pxm = clamp(pxm / 1.5, fitScale(), 72); }
+    // zooming out to the 1px/block overview needs that overview baked —
+    // until it is, HOLD at the current zoom (baking keeps running in
+    // render()) instead of flashing empty sky over unbaked columns
+    let ovPendingZoom = 0;
+    function zoomIn() { ovPendingZoom = 0; pxm = clamp(pxm * 1.5, fitScale(), 72); }
+    function zoomOut() {
+      const next = clamp(pxm / 1.5, fitScale(), 72);
+      if (next <= 2 && pxm > 2 && ovBuiltCol < world.w) { ovPendingZoom = next; return; }
+      pxm = next;
+    }
 
     // tools: mouse uses LMB dig / RMB place; touch taps a block to dig it
     // or taps air to build there — the palette picks which block gets built.
@@ -876,17 +935,17 @@
     // INVENTORY: you start with NOTHING — blocks come from digging them
     // (grass gives dirt). Slot badges show how many you hold.
     let palette = T.DIRT;
-    let layer = 0;               // 0 = front, 1 = back
+    let layer = 0;               // 0 = front, 1 = back — ABSOLUTE, no autoswitch
     function setLayer(l) {
       layer = l ? 1 : 0;
-      el.btnLayer.textContent = layer ? "⧉ Back" : "⧉ Front";
+      el.btnLayer.textContent = layer ? "Back" : "Front";
       el.btnLayer.setAttribute("aria-pressed", layer ? "1" : "0");
       el.btnLayer.classList.toggle("on", layer === 1);
     }
     function toggleLayer() { setLayer(layer === 1 ? 0 : 1); }
     const inv = new Map();       // tile -> count held
     const DROP = { 1: T.DIRT };  // grass drops dirt; everything else drops itself
-    function invAdd(v, n) { inv.set(v, (inv.get(v) || 0) + n); refreshSlots(); }
+    function invAdd(v, n) { inv.set(v, (inv.get(v) || 0) + n); refreshSlots(); renderCraft(); }
     function refreshSlots() {
       let any = false;
       document.querySelectorAll(".slot").forEach((b) => {
@@ -901,6 +960,85 @@
       palette = v;
       document.querySelectorAll(".slot").forEach((b) =>
         b.classList.toggle("sel", +b.dataset.tile === v));
+    }
+
+    // ── crafting book: pickaxe tiers ──
+    // Each tier digs faster; recipes are paid from the block inventory.
+    // Crafted picks persist on this device (localStorage), best one is
+    // always equipped. Costs climb with the ore's home rock layer.
+    const PICKS = [
+      { name: "Wooden Pickaxe",  speed: 1.5, cost: { 5: 4 } },
+      { name: "Stone Pickaxe",   speed: 2.0, cost: { 5: 2, 3: 4 } },
+      { name: "Copper Pickaxe",  speed: 2.7, cost: { 5: 2, 12: 5 } },
+      { name: "Iron Pickaxe",    speed: 3.6, cost: { 5: 2, 13: 6 } },
+      { name: "Golden Pickaxe",  speed: 4.8, cost: { 5: 2, 4: 7 } },
+      { name: "Diamond Pickaxe", speed: 6.2, cost: { 5: 2, 14: 8 } },
+    ];
+    const SLOTCOL = { 2: "#6b4a30", 3: "#57617e", 4: "#a88428", 5: "#8a6238", 7: "#3f7a34",
+                      8: "#3d4459", 9: "#272b3b", 10: "#15171f", 12: "#b87333",
+                      13: "#b6aea2", 14: "#4ec3d8" };
+    const TNAME = { 2: "dirt", 3: "stone", 4: "gold", 5: "wood", 7: "leaves", 8: "slate",
+                    9: "dark rock", 10: "void rock", 12: "copper", 13: "iron", 14: "diamond" };
+    let picksCrafted;
+    try { picksCrafted = new Set(JSON.parse(localStorage.getItem("vr-picks") || "[]")); }
+    catch (_) { picksCrafted = new Set(); }
+    function pickSpeed() {
+      let s = 1;
+      for (const i of picksCrafted) if (PICKS[i]) s = Math.max(s, PICKS[i].speed);
+      return s;
+    }
+    function craft(i) {
+      const p = PICKS[i];
+      if (!p || picksCrafted.has(i)) return;
+      for (const [t, n] of Object.entries(p.cost))
+        if ((inv.get(+t) || 0) < n) return; // can't afford
+      for (const [t, n] of Object.entries(p.cost)) invAdd(+t, -n);
+      picksCrafted.add(i);
+      try { localStorage.setItem("vr-picks", JSON.stringify([...picksCrafted])); } catch (_) {}
+      setStatus(el.roomStatus, "Crafted " + p.name + " — digging ×" + p.speed + " now!", "ok");
+      renderCraft();
+    }
+    function renderCraft() {
+      if (el.craftOverlay.classList.contains("hidden")) return;
+      el.craftCur.textContent = "Your pickaxe: ×" + pickSpeed() + " digging speed";
+      el.craftList.innerHTML = "";
+      PICKS.forEach((p, i) => {
+        const owned = picksCrafted.has(i);
+        const row = document.createElement("div");
+        row.className = "craft-row";
+        const info = document.createElement("div");
+        info.className = "craft-info";
+        info.innerHTML = '<div class="craft-name"></div>' +
+          '<div class="craft-speed">Tier ' + (i + 1) + " · ×" + p.speed + ' digging</div>';
+        info.querySelector(".craft-name").textContent = p.name;
+        const cost = document.createElement("div");
+        cost.className = "craft-cost";
+        for (const [t, n] of Object.entries(p.cost)) {
+          const have = inv.get(+t) || 0;
+          const chip = document.createElement("span");
+          chip.className = "craft-chip" + (!owned && have < n ? " lack" : "");
+          chip.innerHTML = '<span class="sw"></span><span class="ct"></span>';
+          chip.querySelector(".sw").style.background = SLOTCOL[t] || "#888";
+          chip.querySelector(".ct").textContent = Math.min(have, n) + "/" + n + " " + TNAME[t];
+          cost.appendChild(chip);
+        }
+        info.appendChild(cost);
+        const btn = document.createElement("button");
+        if (owned) {
+          btn.textContent = "Owned ✓"; btn.disabled = true; btn.className = "btn-ghost craft-btn";
+        } else {
+          const ok = Object.entries(p.cost).every(([t, n]) => (inv.get(+t) || 0) >= n);
+          btn.textContent = "Craft"; btn.disabled = !ok; btn.className = "btn-primary craft-btn";
+          btn.addEventListener("click", () => craft(i));
+        }
+        row.appendChild(info); row.appendChild(btn);
+        el.craftList.appendChild(row);
+      });
+    }
+    function toggleCraft() {
+      const open = el.craftOverlay.classList.contains("hidden");
+      el.craftOverlay.classList.toggle("hidden", !open);
+      if (open) { el.menuOverlay.classList.add("hidden"); renderCraft(); }
     }
 
     // ── overlay + chunk caches ──
@@ -952,7 +1090,10 @@
       dirtDark: [95, 63, 39], pebble: [160, 120, 74],
       stone: [[127, 127, 127], [118, 118, 118], [138, 138, 138], [112, 112, 118]],
       stoneDark: [95, 95, 100],
-      ore: [[232, 185, 61], [245, 215, 110], [210, 160, 45]],
+      ore: [[232, 185, 61], [245, 215, 110], [210, 160, 45]],          // gold
+      copper: [[206, 128, 62], [226, 152, 82], [178, 104, 46]],
+      iron: [[206, 198, 186], [228, 222, 212], [182, 174, 162]],
+      diamond: [[94, 214, 226], [150, 240, 248], [64, 180, 200]],
       bark: [[107, 74, 42], [93, 63, 36], [117, 82, 46], [85, 56, 32]],
       barkDark: [68, 45, 26], barkHi: [136, 99, 57],
       leaf: [[64, 124, 52], [74, 138, 58], [56, 112, 46], [86, 150, 66]],
@@ -991,8 +1132,13 @@
           else c = r2 < 0.08 ? MCP.dirtDark : r2 < 0.14 ? MCP.pebble : pick(MCP.dirt, r);
         } else if (v === T.DIRT) {
           c = r2 < 0.08 ? MCP.dirtDark : r2 < 0.14 ? MCP.pebble : pick(MCP.dirt, r);
-        } else if (v === T.STONE || v === T.ORE) {
-          c = r2 < 0.07 ? MCP.stoneDark : pick(MCP.stone, r);
+        } else if (v === T.STONE || v === T.ORE || v === T.COPPER || v === T.IRON || v === T.DIAMOND) {
+          // ore blocks wear their home layer's rock as the base
+          const base = v === T.IRON ? [MCP.rock2, MCP.rock2Dark]
+            : v === T.ORE ? [MCP.rock3, MCP.rock3Dark]      // gold → dark rock
+            : v === T.DIAMOND ? [MCP.rock4, MCP.rock4Dark]  // diamond → void rock
+            : [MCP.stone, MCP.stoneDark];                   // copper → stone
+          c = r2 < 0.07 ? base[1] : pick(base[0], r);
         } else if (v === T.ROCK2 || v === T.ROCK3 || v === T.ROCK4) {
           // deeper = darker, more cracked
           const P = v === T.ROCK2 ? MCP.rock2 : v === T.ROCK3 ? MCP.rock3 : MCP.rock4;
@@ -1024,12 +1170,15 @@
         }
         set(x, y, c);
       }
-      if (v === T.ORE) { // gold clusters on top of the stone
+      // ore clusters sprinkled over the base rock (gold/copper/iron/diamond)
+      const ORECLUST = v === T.ORE ? MCP.ore : v === T.COPPER ? MCP.copper
+        : v === T.IRON ? MCP.iron : v === T.DIAMOND ? MCP.diamond : null;
+      if (ORECLUST) {
         for (let k = 0; k < 4; k++) {
           const cx = 1 + ((R(k, 1, 61) * 12) | 0), cy = 1 + ((R(k, 2, 71) * 12) | 0);
           for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++)
             if (R(k * 4 + dx, dy, 81) > 0.25)
-              set(Math.min(S - 1, cx + dx), Math.min(S - 1, cy + dy), pick(MCP.ore, R(dx, dy, k + 91)));
+              set(Math.min(S - 1, cx + dx), Math.min(S - 1, cy + dy), pick(ORECLUST, R(dx, dy, k + 91)));
         }
       }
       // soft bevel so neighbours read as separate blocks (no drawn grid) —
@@ -1346,8 +1495,8 @@
       el.btnGhost.classList.toggle("hidden", !tester);
       setGhost(false);
       document.querySelector(".keys-hint").textContent = tester
-        ? "A/D move · Space jump · LMB dig / RMB place · Q front/back layer · 1–8 pick · +/− zoom · ghost: Space/S or joystick"
-        : "A/D move · Space jump · LMB dig / RMB place · Q front/back layer · dig blocks to collect them · 1–8 pick · +/− zoom";
+        ? "A/D move · Space jump · LMB dig / RMB place · Q layer · C craft · 1–0 pick · +/− zoom · ghost: Space/S or joystick"
+        : "A/D move · Space jump · LMB dig / RMB place · Q layer · C craft · dig blocks to collect them · 1–0 pick · +/− zoom";
       wsUrl = workerUrl.replace(/^http/, "ws") +
         "/ws?room=" + encodeURIComponent(roomName) +
         "&name=" + encodeURIComponent(name) +
@@ -1355,9 +1504,9 @@
       active = true; hasWorld = false;
       overlay.clear(); overlayB.clear();
       chunkData.clear(); chunkTex.clear(); lru.length = 0; lruBytes = 0;
-      hcache.clear(); lavaGlowTop.clear(); ovTiles = []; ovBuiltCol = 0;
+      hcache.clear(); lavaGlowTop.clear(); ovTiles = []; ovBuiltCol = 0; ovPendingZoom = 0;
       pxm = 48; inv.clear(); refreshSlots(); setPalette(T.DIRT); setLayer(0);
-      mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0; mine.layer = 0;
+      mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0;
       wireInput();
       connectWs();
       lastTs = 0; acc = 0;
@@ -1516,22 +1665,28 @@
         r.y += (r.ty - r.y) * k;
       }
 
-      // mining / placing while held
+      // mining / placing while held — always in the SELECTED layer
       if (mine.held && mine.action === "dig" && mine.tx >= 0) {
-        if (!validDigTarget(mine.tx, mine.ty, mine.layer)) {
+        if (!validDigTarget(mine.tx, mine.ty)) {
           mine.prog = Math.max(0, mine.prog - dt * 2.5); // wandered off → heals
         } else {
-          const hv = mine.layer === 1 ? getBack(mine.tx, mine.ty) : getTile(mine.tx, mine.ty);
-          mine.prog += dt / (HARD[hv] || 1);
+          const hv = layer === 1 ? getBack(mine.tx, mine.ty) : getTile(mine.tx, mine.ty);
+          mine.prog += dt * pickSpeed() / (HARD[hv] || 1); // pickaxes dig faster
           if (mine.prog >= 1) {
-            invAdd(mine.layer === 1 ? hv : (DROP[hv] || hv), 1);
-            setTileLocal(mine.tx, mine.ty, T.AIR, mine.layer); // optimistic; server confirms
+            if (layer === 1) {
+              const mv = overlayB.get(mine.tx + "," + mine.ty);
+              if (mv !== undefined && mv !== T.AIR) invAdd(mv, 1); // refund placed wall
+              else if (hv === T.WOOD) invAdd(T.WOOD, 1);           // trunk → wood
+              // natural strata walls crumble to nothing
+            } else {
+              invAdd(DROP[hv] || hv, 1);
+            }
+            setTileLocal(mine.tx, mine.ty, T.AIR, layer); // optimistic; server confirms
             if (ws && ws.readyState === 1)
-              ws.send(JSON.stringify({ t: "dig", x: mine.tx, y: mine.ty, l: mine.layer }));
+              ws.send(JSON.stringify({ t: "dig", x: mine.tx, y: mine.ty, l: layer }));
             mine.prog = 0;
             const tx2 = Math.floor(mine.wx), ty2 = Math.floor(mine.wy);
-            const dl = pickDigLayer(tx2, ty2);
-            if (dl >= 0) { mine.tx = tx2; mine.ty = ty2; mine.layer = dl; }
+            if (validDigTarget(tx2, ty2)) { mine.tx = tx2; mine.ty = ty2; }
             else mine.tx = -1;
           }
         }
@@ -1562,33 +1717,23 @@
     }
 
     // ── dig & place ──
-    const mine = { pid: -1, action: "dig", tx: -1, ty: 0, wx: 0, wy: 0, prog: 0, held: false, placeT: 0, layer: 0 };
+    const mine = { pid: -1, action: "dig", tx: -1, ty: 0, wx: 0, wy: 0, prog: 0, held: false, placeT: 0 };
 
     function inReach(tx, ty) {
       const dx = tx + 0.5 - (me.x + PW / 2), dy = ty + 0.5 - (me.y + PH / 2);
       const r = world.reach + 0.3;
       return dx * dx + dy * dy <= r * r;
     }
-    function validDigTarget(tx, ty, lyr) {
+    // ABSOLUTE layers: the toggle picks the layer, and every tap/click hits
+    // THAT layer only — occupied cell = break it, empty cell = place there.
+    function validDigTarget(tx, ty) {
       if (!inReach(tx, ty)) return false;
-      if (lyr === 1) {
-        // back: placed walls & tree trunks can be dug out (trunks are how
-        // you get wood now); natural terrain walls are forever
+      if (layer === 1) {
         const bv = getBack(tx, ty);
-        if (bv === T.AIR || bv === T.BEDROCK || bv === T.LAVA) return false;
-        const mv = overlayB.get(tx + "," + ty);
-        return mv !== undefined ? mv !== T.AIR : bv === T.WOOD;
+        return bv !== T.AIR && bv !== T.BEDROCK && bv !== T.LAVA;
       }
       const v = getTile(tx, ty);
       return v !== T.AIR && v !== T.BEDROCK && v !== T.LAVA;
-    }
-    // which layer a dig actually hits: the toggle decides, but FRONT mode
-    // falls through to the back when no front block is there (trunks!)
-    function pickDigLayer(tx, ty) {
-      if (layer === 1) return validDigTarget(tx, ty, 1) ? 1 : -1;
-      if (validDigTarget(tx, ty, 0)) return 0;
-      if (validDigTarget(tx, ty, 1)) return 1;
-      return -1;
     }
     function tryPlace(tx, ty) {
       if ((inv.get(palette) || 0) <= 0) return; // you can only place what you dug
@@ -1724,6 +1869,13 @@
         gl2.addColorStop(1, "#3d0e03");
         ctx.fillStyle = gl2;
         ctx.fillRect(camX - 1, world.h, viewW + 2, camY + viewH - world.h);
+      }
+
+      // a pending overview zoom: keep baking each frame, take the zoom
+      // the moment the whole map is baked — never show unbaked sky
+      if (ovPendingZoom) {
+        bakeOverviewSome();
+        if (ovBuiltCol >= world.w) { pxm = ovPendingZoom; ovPendingZoom = 0; }
       }
 
       if (pxm > 2) {
@@ -1955,10 +2107,12 @@
           input.jump = true; e.preventDefault();
         }
         else if (e.key === "q" || e.key === "Q") toggleLayer(); // front ↔ back
-        else if (e.key >= "1" && e.key <= "8") {
+        else if (e.key === "c" || e.key === "C") toggleCraft(); // crafting book
+        else if (e.key >= "0" && e.key <= "9") { // slots 1–9, 0 = 10th
+          const idx = e.key === "0" ? 9 : +e.key - 1;
           const vis = [...document.querySelectorAll(".slot")]
             .filter((b) => !b.classList.contains("hidden"));
-          const b = vis[+e.key - 1];
+          const b = vis[idx];
           if (b) setPalette(+b.dataset.tile);
         }
         else if (e.key === "+" || e.key === "=") zoomIn();
@@ -2016,18 +2170,17 @@
           else if (e.button === 0) action = "dig";
           else return;
         } else {
-          // touch & pen: what you tap chooses — a diggable block (front
-          // first, then the back) means dig it, otherwise build there
+          // touch & pen: what you tap chooses, in the SELECTED layer —
+          // an occupied cell means break it, an empty one means build there
           if (e.button !== 0 && e.pointerType !== "touch") return;
-          action = pickDigLayer(tx, ty) >= 0 ? "dig" : "place";
+          action = validDigTarget(tx, ty) ? "dig" : "place";
         }
         mine.pid = e.pointerId; mine.action = action; mine.held = true; mine.placeT = 0;
         if (action === "dig") {
-          const dl = pickDigLayer(tx, ty); // toggle picks, front falls through to back
-          if (dl >= 0) { mine.tx = tx; mine.ty = ty; mine.layer = dl; mine.prog = 0; }
+          if (validDigTarget(tx, ty)) { mine.tx = tx; mine.ty = ty; mine.prog = 0; }
           else mine.tx = -1;
         } else {
-          mine.tx = tx; mine.ty = ty; mine.layer = layer;
+          mine.tx = tx; mine.ty = ty;
           tryPlace(tx, ty);
         }
         try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
@@ -2039,8 +2192,7 @@
         if (mine.action === "dig") {
           if (tx !== mine.tx || ty !== mine.ty) {
             mine.prog = 0; // moved to a new tile → the old one heals
-            const dl = pickDigLayer(tx, ty);
-            if (dl >= 0) { mine.tx = tx; mine.ty = ty; mine.layer = dl; }
+            if (validDigTarget(tx, ty)) { mine.tx = tx; mine.ty = ty; }
             else mine.tx = -1;
           }
         } else {
@@ -2086,7 +2238,7 @@
     }
 
     return {
-      start, stop, zoomIn, zoomOut, setPalette, toggleLayer,
+      start, stop, zoomIn, zoomOut, setPalette, toggleLayer, toggleCraft,
       isActive: () => active,
       hasWorld: () => hasWorld,
       remoteCount: () => remotes.size,
@@ -2103,6 +2255,7 @@
         get ovMode() { return pxm <= 2; },
         inv, T,
         get room() { return curRoom; }, get ghostOn() { return ghostOn; },
+        pickSpeed, craft, PICKS, get picksCrafted() { return picksCrafted; },
       },
     };
   })();

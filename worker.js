@@ -44,12 +44,14 @@ const WORLD = {
 };
 const PW = 0.8, PH = 1.8; // player collision box (m)
 
-// Tile types
+// Tile types (T_ORE = gold)
 const T_AIR = 0, T_GRASS = 1, T_DIRT = 2, T_STONE = 3, T_ORE = 4, T_WOOD = 5, T_BEDROCK = 6,
-      T_LEAVES = 7, T_ROCK2 = 8, T_ROCK3 = 9, T_ROCK4 = 10, T_LAVA = 11;
+      T_LEAVES = 7, T_ROCK2 = 8, T_ROCK3 = 9, T_ROCK4 = 10, T_LAVA = 11,
+      T_COPPER = 12, T_IRON = 13, T_DIAMOND = 14;
 // Seconds to mine per type (bedrock/lava = unbreakable, not in the table)
-const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1, 7: 0.3, 8: 3.2, 9: 5.5, 10: 9 };
-const PLACEABLE = { 2: 1, 3: 1, 4: 1, 5: 1, 7: 1, 8: 1, 9: 1, 10: 1 };
+const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1, 7: 0.3, 8: 3.2, 9: 5.5, 10: 9,
+               12: 2.0, 13: 3.4, 14: 5.0 };
+const PLACEABLE = { 2: 1, 3: 1, 4: 1, 5: 1, 7: 1, 8: 1, 9: 1, 10: 1, 12: 1, 13: 1, 14: 1 };
 
 // ── Deterministic terrain (KEEP IN SYNC with index.html) ──────────
 function hash2(x, y, seed) {
@@ -125,13 +127,15 @@ function tileAt(seed, x, y) {
   if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T_AIR; // caves
   if (d === 0) return T_GRASS;
   if (d < 5) return T_DIRT;
-  if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T_ORE;
-  // rock grows harder & darker with depth — perlin-wobbled boundaries
+  // rock grows harder & darker with depth — perlin-wobbled boundaries —
+  // and each rock layer carries its own ore: copper in stone, iron in
+  // slate, gold in dark rock, diamond in void rock
   const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
-  if (dd > 900) return T_ROCK4;
-  if (dd > 480) return T_ROCK3;
-  if (dd > 190) return T_ROCK2;
-  return T_STONE;
+  const or = hash2(x, y, seed ^ 0x9e37);
+  if (dd > 900) return or < 0.020 ? T_DIAMOND : T_ROCK4;
+  if (dd > 480) return or < 0.025 ? T_ORE : T_ROCK3;
+  if (dd > 190) return or < 0.025 ? T_IRON : T_ROCK2;
+  return or < 0.025 ? T_COPPER : T_STONE;
 }
 // Natural BACK layer (KEEP IN SYNC with index.html): terrain always has
 // a back wall — the same strata as the front but with no cave hollows —
@@ -145,7 +149,7 @@ function backAt(seed, x, y) {
   if (y < h) return trunkAt(seed, x, y);       // sky band: just trunks
   const d = y - h;
   if (d < 5) return T_DIRT;                    // dirt wall behind grass too
-  if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T_ORE;
+  // walls are plain strata — no ore in the back layer
   const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
   if (dd > 900) return T_ROCK4;
   if (dd > 480) return T_ROCK3;
@@ -411,13 +415,13 @@ export class GameRoom {
       const x = m.x | 0, y = m.y | 0, l = m.l === 1 ? 1 : 0;
       if (x < 0 || y < 0 || x >= WORLD.w || y >= WORLD.h) return;
       if (l === 1) {
-        // back layer: placed walls & tree trunks dig out (trunks = the wood
-        // supply); natural terrain walls are permanent
+        // back layer: ABSOLUTE like the front — natural walls, placed
+        // walls and tree trunks all dig out; only air/bedrock/lava refuse
         const bv = this.effectiveBack(x, y);
         if (bv === T_AIR || bv === T_BEDROCK || bv === T_LAVA || !this.inReach(p, x, y)) { this.correct(ws, x, y, 1); return; }
-        if (!this.backModMap.has(x + "," + y) && bv !== T_WOOD) { this.correct(ws, x, y, 1); return; }
         const now = Date.now();
-        if (now - p.lastBreak < (HARD[bv] || 1) * 800) { this.correct(ws, x, y, 1); return; } // too fast
+        // pickaxes mine up to ×6.2 faster — the rate limit must allow it
+        if (now - p.lastBreak < (HARD[bv] || 1) * 100) { this.correct(ws, x, y, 1); return; } // too fast
         p.lastBreak = now;
         this.setTile(x, y, T_AIR, 1);
         this.broadcast({ t: "b", x, y, v: T_AIR, l: 1 });
@@ -426,7 +430,7 @@ export class GameRoom {
       const v = this.effective(x, y);
       if (v === T_AIR || v === T_BEDROCK || v === T_LAVA || !this.inReach(p, x, y)) { this.correct(ws, x, y, 0); return; }
       const now = Date.now();
-      if (now - p.lastBreak < (HARD[v] || 1) * 800) { this.correct(ws, x, y, 0); return; } // too fast
+      if (now - p.lastBreak < (HARD[v] || 1) * 100) { this.correct(ws, x, y, 0); return; } // too fast (pickaxe speed allowed)
       p.lastBreak = now;
       this.setTile(x, y, T_AIR, 0);
       this.broadcast({ t: "b", x, y, v: T_AIR, l: 0 });
