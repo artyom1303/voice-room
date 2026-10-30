@@ -87,7 +87,8 @@ function heightAt(seed, x) { // y of the surface (grass) row; y grows down
   return clamp(Math.floor(2000 + hills * 76 + broad * 140), 40, WORLD.h - 60);
 }
 // trees: one per 9-column bucket (bucket hash picks position & trunk
-// height), so trunks never touch. None near spawn.
+// height), so trunks never touch. Trunks live ENTIRELY in the back layer
+// (walk-through); only the LEAVES crown stays up front. None near spawn.
 function treeCol(seed, c) { // is there a trunk at column c?
   if (Math.abs(c - WORLD.spawnX) < 8) return false;
   const b = Math.floor(c / 9);
@@ -95,11 +96,15 @@ function treeCol(seed, c) { // is there a trunk at column c?
   return c === b * 9 + 1 + ((hash2(b, 1, seed + 92) * 7) | 0);
 }
 function trunkH(seed, c) { return 4 + ((hash2(c, 2, seed + 95) * 3) | 0); } // 4–6
-function treeAt(seed, x, y) { // sky band only: trunk / crown, else AIR
+function trunkAt(seed, x, y) { // back layer: the trunk column, else AIR
+  if (!treeCol(seed, x)) return T_AIR;
+  const hc = heightAt(seed, x), top = hc - trunkH(seed, x);
+  return y >= top && y < hc ? T_WOOD : T_AIR;
+}
+function crownAt(seed, x, y) { // front layer: the leafy crown, else AIR
   for (let c = x - 3; c <= x + 3; c++) {
     if (!treeCol(seed, c)) continue;
     const hc = heightAt(seed, c), top = hc - trunkH(seed, c);
-    if (x === c && y >= top && y < hc) return T_WOOD;   // trunk
     if (y < top - 2 || y > top + 1) continue;           // crown = 4 tidy rows
     const dx = Math.abs(x - c), dy = y - top;
     const R = 2 + ((hash2(c, 3, seed + 98) * 2) | 0);   // crown radius 2 or 3
@@ -115,13 +120,32 @@ function tileAt(seed, x, y) {
   if (x < 0 || x >= WORLD.w) return T_BEDROCK; // side walls
   if (y >= WORLD.h - 8) return T_LAVA;         // glowing lava floor
   const h = heightAt(seed, x);
-  if (y < h) return treeAt(seed, x, y);        // sky band: trees or air
+  if (y < h) return crownAt(seed, x, y);       // sky band: crowns up front
   const d = y - h;
   if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T_AIR; // caves
   if (d === 0) return T_GRASS;
   if (d < 5) return T_DIRT;
   if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T_ORE;
   // rock grows harder & darker with depth — perlin-wobbled boundaries
+  const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
+  if (dd > 900) return T_ROCK4;
+  if (dd > 480) return T_ROCK3;
+  if (dd > 190) return T_ROCK2;
+  return T_STONE;
+}
+// Natural BACK layer (KEEP IN SYNC with index.html): terrain always has
+// a back wall — the same strata as the front but with no cave hollows —
+// and tree trunks stand in the back above ground. Never collides.
+function backAt(seed, x, y) {
+  x |= 0; y |= 0;
+  if (y < 0) return T_AIR;
+  if (x < 0 || x >= WORLD.w) return T_BEDROCK;
+  if (y >= WORLD.h - 8) return T_LAVA;
+  const h = heightAt(seed, x);
+  if (y < h) return trunkAt(seed, x, y);       // sky band: just trunks
+  const d = y - h;
+  if (d < 5) return T_DIRT;                    // dirt wall behind grass too
+  if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T_ORE;
   const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
   if (dd > 900) return T_ROCK4;
   if (dd > 480) return T_ROCK3;
@@ -244,13 +268,16 @@ function b64urlBytes(bytes) {
 //
 //  Client → here:   { t:"p", x, y }              position update
 //                   { t:"hb" }                    heartbeat
-//                   { t:"dig", x, y }             break tile (validated)
-//                   { t:"place", x, y, v }        place tile (validated)
+//                   { t:"dig", x, y, l }          break tile (validated)
+//                   { t:"place", x, y, v, l }     place tile (validated)
 //  Here → client:   { t:"init", you, world, seed, players, mods }
 //                   { t:"+", id, name, x, y }     someone joined
 //                   { t:"p", id, x, y }           someone moved
 //                   { t:"-", id }                 someone left
-//                   { t:"b", x, y, v }            tile changed (0 = air)
+//                   { t:"b", x, y, v, l }         tile changed (0 = air)
+//
+//  l = layer: 0 front (solid), 1 back (walk-through wall). Mods persist
+//  as [x, y, v, l] — old 3-element entries are front-layer.
 //
 //  The terrain itself is procedural; only edits ("mods"), the seed,
 //  and player positions are persisted.
@@ -261,8 +288,9 @@ export class GameRoom {
     this.ctx = ctx;
     this.players = new Map(); // connected: id -> { name, x, y, cid, lastSeen }
     this.saved = {};          // persisted:  id -> { name, x, y }
-    this.mods = [];           // persisted:  [[x, y, v], ...] every dig/place ever
-    this.modMap = new Map();  // "x,y" -> v  (fast lookup mirror of mods)
+    this.mods = [];           // persisted:  [[x, y, v, l], ...] every dig/place ever
+    this.modMap = new Map();  // "x,y" -> v  FRONT (fast lookup mirror of mods)
+    this.backModMap = new Map(); // "x,y" -> v  BACK
     this.seed = 0;
     this.saveTimer = null;
     this.ready = ctx.blockConcurrencyWhile(async () => {
@@ -275,7 +303,8 @@ export class GameRoom {
       } catch (_) {
         this.saved = {}; this.mods = []; this.seed = this.seed || 1;
       }
-      for (const [x, y, v] of this.mods) this.modMap.set(x + "," + y, v);
+      for (const [x, y, v, l] of this.mods)
+        (l === 1 ? this.backModMap : this.modMap).set(x + "," + y, v);
       // Rebuild after waking from hibernation: sockets are still open,
       // reload their players from storage. lastSeen resets — an open
       // socket is proof of life.
@@ -307,14 +336,20 @@ export class GameRoom {
     return v === undefined ? tileAt(this.seed, x, y) : v;
   }
 
+  effectiveBack(x, y) {
+    const v = this.backModMap.get(x + "," + y);
+    return v === undefined ? backAt(this.seed, x, y) : v;
+  }
+
   inReach(p, x, y) {
     const dx = x + 0.5 - (p.x + PW / 2);
     const dy = y + 0.5 - (p.y + PH / 2);
     return dx * dx + dy * dy <= 5.8 * 5.8; // a little slack over WORLD.reach for lag
   }
 
-  correct(ws, x, y) { // tell one client the authoritative state of a tile
-    try { ws.send(JSON.stringify({ t: "b", x, y, v: this.effective(x, y) })); } catch (_) {}
+  correct(ws, x, y, l = 0) { // tell one client the authoritative state of a tile
+    const v = l === 1 ? this.effectiveBack(x, y) : this.effective(x, y);
+    try { ws.send(JSON.stringify({ t: "b", x, y, v, l })); } catch (_) {}
   }
 
   async fetch(request) {
@@ -373,36 +408,60 @@ export class GameRoom {
       this.scheduleSave();
 
     } else if (m.t === "dig") {
-      const x = m.x | 0, y = m.y | 0;
+      const x = m.x | 0, y = m.y | 0, l = m.l === 1 ? 1 : 0;
       if (x < 0 || y < 0 || x >= WORLD.w || y >= WORLD.h) return;
+      if (l === 1) {
+        // back layer: placed walls & tree trunks dig out (trunks = the wood
+        // supply); natural terrain walls are permanent
+        const bv = this.effectiveBack(x, y);
+        if (bv === T_AIR || bv === T_BEDROCK || bv === T_LAVA || !this.inReach(p, x, y)) { this.correct(ws, x, y, 1); return; }
+        if (!this.backModMap.has(x + "," + y) && bv !== T_WOOD) { this.correct(ws, x, y, 1); return; }
+        const now = Date.now();
+        if (now - p.lastBreak < (HARD[bv] || 1) * 800) { this.correct(ws, x, y, 1); return; } // too fast
+        p.lastBreak = now;
+        this.setTile(x, y, T_AIR, 1);
+        this.broadcast({ t: "b", x, y, v: T_AIR, l: 1 });
+        return;
+      }
       const v = this.effective(x, y);
-      if (v === T_AIR || v === T_BEDROCK || v === T_LAVA || !this.inReach(p, x, y)) { this.correct(ws, x, y); return; }
+      if (v === T_AIR || v === T_BEDROCK || v === T_LAVA || !this.inReach(p, x, y)) { this.correct(ws, x, y, 0); return; }
       const now = Date.now();
-      if (now - p.lastBreak < (HARD[v] || 1) * 800) { this.correct(ws, x, y); return; } // too fast
+      if (now - p.lastBreak < (HARD[v] || 1) * 800) { this.correct(ws, x, y, 0); return; } // too fast
       p.lastBreak = now;
-      this.setTile(x, y, T_AIR);
-      this.broadcast({ t: "b", x, y, v: T_AIR });
+      this.setTile(x, y, T_AIR, 0);
+      this.broadcast({ t: "b", x, y, v: T_AIR, l: 0 });
 
     } else if (m.t === "place") {
-      const x = m.x | 0, y = m.y | 0, v = m.v | 0;
+      const x = m.x | 0, y = m.y | 0, v = m.v | 0, l = m.l === 1 ? 1 : 0;
       if (x < 0 || y < 0 || x >= WORLD.w || y >= WORLD.h) return;
       if (!PLACEABLE[v]) return;
-      if (this.effective(x, y) !== T_AIR) { this.correct(ws, x, y); return; }
-      if (!this.inReach(p, x, y)) { this.correct(ws, x, y); return; }
+      if (l === 1) {
+        // back wall: any empty back cell; walk-through, so no entomb check
+        if (this.effectiveBack(x, y) !== T_AIR) { this.correct(ws, x, y, 1); return; }
+        if (!this.inReach(p, x, y)) { this.correct(ws, x, y, 1); return; }
+        const now = Date.now();
+        if (now - p.lastPlace < 160) { this.correct(ws, x, y, 1); return; } // too fast
+        p.lastPlace = now;
+        this.setTile(x, y, v, 1);
+        this.broadcast({ t: "b", x, y, v, l: 1 });
+        return;
+      }
+      if (this.effective(x, y) !== T_AIR) { this.correct(ws, x, y, 0); return; }
+      if (!this.inReach(p, x, y)) { this.correct(ws, x, y, 0); return; }
       const now = Date.now();
-      if (now - p.lastPlace < 160) { this.correct(ws, x, y); return; } // too fast
+      if (now - p.lastPlace < 160) { this.correct(ws, x, y, 0); return; } // too fast
       for (const pl of this.players.values()) { // never entomb a player
-        if (x < pl.x + PW && x + 1 > pl.x && y < pl.y + PH && y + 1 > pl.y) { this.correct(ws, x, y); return; }
+        if (x < pl.x + PW && x + 1 > pl.x && y < pl.y + PH && y + 1 > pl.y) { this.correct(ws, x, y, 0); return; }
       }
       p.lastPlace = now;
-      this.setTile(x, y, v);
-      this.broadcast({ t: "b", x, y, v });
+      this.setTile(x, y, v, 0);
+      this.broadcast({ t: "b", x, y, v, l: 0 });
     }
   }
 
-  setTile(x, y, v) {
-    this.modMap.set(x + "," + y, v);
-    this.mods.push([x, y, v]);
+  setTile(x, y, v, l = 0) {
+    (l === 1 ? this.backModMap : this.modMap).set(x + "," + y, v);
+    this.mods.push([x, y, v, l]);
     this.scheduleSave();
   }
 

@@ -138,6 +138,10 @@
     transform: translate(-50%, -50%); pointer-events: none; }
   .btn-ghost.on { background: rgba(108,140,255,.4); border-color: rgba(108,140,255,.85);
     color: #fff; }
+  .pill-btn.wide { width: auto; border-radius: 99px; padding: 0 13px;
+    font-size: 12.5px; font-weight: 650; white-space: nowrap; }
+  .pill-btn.on { background: rgba(108,140,255,.4); border-color: rgba(108,140,255,.85);
+    color: #fff; }
   .pad-btn { width: 64px; height: 64px; border-radius: 50%; background: rgba(20,26,46,.66);
     border: 1px solid var(--border); backdrop-filter: blur(8px); font-size: 20px;
     color: var(--text); touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -218,13 +222,17 @@
     </div>
 
     <p id="room-status" class="status hud-status"></p>
-    <div class="keys-hint">A/D move · Space jump · LMB dig / RMB place · dig blocks to collect them · 1–8 pick · +/− zoom</div>
+    <div class="keys-hint">A/D move · Space jump · LMB dig / RMB place · Q front/back layer · dig blocks to collect them · 1–8 pick · +/− zoom</div>
 
     <div class="hud hud-bottom">
       <div class="hud-row">
         <div class="pill">
           <button id="btn-zoom-out" class="pill-btn" aria-label="Zoom out">−</button>
           <button id="btn-zoom-in" class="pill-btn" aria-label="Zoom in">+</button>
+        </div>
+        <div class="pill">
+          <button id="btn-layer" class="pill-btn wide" aria-pressed="false"
+                  title="Dig &amp; build in the walk-through back layer (Q)">⧉ Front</button>
         </div>
         <div class="pill" id="slots">
           <button class="slot sel hidden" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"><span class="n">0</span></button>
@@ -299,6 +307,7 @@
     btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"),
     btnMenu: $("btn-menu"), btnMenuClose: $("btn-menu-close"),
     menuOverlay: $("menu-overlay"), optAutostep: $("opt-autostep"),
+    btnLayer: $("btn-layer"),
     btnGhost: $("btn-ghost"), padL: $("pad-l"), padR: $("pad-r"),
     joy: $("joy"), joyKnob: $("joy-knob"),
   };
@@ -656,6 +665,7 @@
     el.btnLeave.addEventListener("click", onLeave);
     el.btnZoomIn.addEventListener("click", Game.zoomIn);
     el.btnZoomOut.addEventListener("click", Game.zoomOut);
+    el.btnLayer.addEventListener("click", Game.toggleLayer);
 
     // ── in-game menu ──
     el.btnMenu.addEventListener("click", () => el.menuOverlay.classList.remove("hidden"));
@@ -702,8 +712,10 @@
 
      Mining: hold on a tile — it chips at the block's hardness rate;
      release or wander out of reach and the damage heals back.
-     Desktop: LMB dig · RMB place · 1–3 pick block.
-     Touch: tap a block to dig it, tap air to build there — no mode toggle.
+     Desktop: LMB dig · RMB place · Q toggles front/back layer · 1–8 pick.
+     Touch: tap a block to dig it, tap air to build there — the ⧉ button
+     picks the layer. BACK layer: darker, walk-through; terrain always
+     has a back wall, and tree trunks live entirely in the back.
 
      Proximity voice: volume = 1 − |Δx| / world.hear.
      ═══════════════════════════════════════════════════════════════ */
@@ -761,8 +773,9 @@
       return h;
     }
     // trees: one per 9-column bucket (bucket hash picks position & trunk
-    // height), so trunks never touch. Trunk = WOOD, crown = LEAVES blob.
-    // None near spawn, so you never materialize inside a trunk.
+    // height), so trunks never touch. Trunks live ENTIRELY in the back
+    // layer (darkened, walk-through) — only the LEAVES crown stays up
+    // front and solid. None near spawn, so you never materialize in a tree.
     function treeCol(c) { // is there a trunk at column c?
       if (Math.abs(c - (world.spawnX || 5000)) < 8) return false;
       const b = Math.floor(c / 9);
@@ -770,11 +783,15 @@
       return c === b * 9 + 1 + ((hash2(b, 1, seed + 92) * 7) | 0);
     }
     function trunkH(c) { return 4 + ((hash2(c, 2, seed + 95) * 3) | 0); } // 4–6
-    function treeAt(x, y) { // sky band only: trunk / crown, else AIR
+    function trunkAt(x, y) { // back layer: the trunk column, else AIR
+      if (!treeCol(x)) return T.AIR;
+      const hc = heightAt(x), top = hc - trunkH(x);
+      return y >= top && y < hc ? T.WOOD : T.AIR;
+    }
+    function crownAt(x, y) { // front layer: the leafy crown, else AIR
       for (let c = x - 3; c <= x + 3; c++) {
         if (!treeCol(c)) continue;
         const hc = heightAt(c), top = hc - trunkH(c);
-        if (x === c && y >= top && y < hc) return T.WOOD;   // trunk
         if (y < top - 2 || y > top + 1) continue;           // crown = 4 tidy rows
         const dx = Math.abs(x - c), dy = y - top;
         const R = 2 + ((hash2(c, 3, seed + 98) * 2) | 0);   // crown radius 2 or 3
@@ -790,13 +807,35 @@
       if (x < 0 || x >= world.w) return T.BEDROCK; // side walls
       if (y >= world.h - 8) return T.LAVA;         // glowing lava floor
       const h = heightAt(x);
-      if (y < h) return treeAt(x, y);              // sky band: trees or air
+      if (y < h) return crownAt(x, y);             // sky band: crowns up front
       const d = y - h;
       if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T.AIR; // caves
       if (d === 0) return T.GRASS;
       if (d < 5) return T.DIRT;
       if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T.ORE;
       // rock grows harder & darker with depth — perlin-wobbled boundaries
+      const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
+      if (dd > 900) return T.ROCK4;
+      if (dd > 480) return T.ROCK3;
+      if (dd > 190) return T.ROCK2;
+      return T.STONE;
+    }
+
+    // ── natural BACK layer (KEEP IN SYNC with worker.js) ──
+    // Terrain ALWAYS has a back wall: the same strata as the front but
+    // with no cave hollows, so a dug tunnel or cave keeps a dark wall
+    // behind it. Above ground the only natural back is tree trunks.
+    // Rendered darker & never collides; players can also place blocks here.
+    function backAt(x, y) {
+      x |= 0; y |= 0;
+      if (y < 0) return T.AIR;
+      if (x < 0 || x >= world.w) return T.BEDROCK;
+      if (y >= world.h - 8) return T.LAVA;
+      const h = heightAt(x);
+      if (y < h) return trunkAt(x, y);           // sky band: just trunks
+      const d = y - h;
+      if (d < 5) return T.DIRT;                  // dirt wall behind grass too
+      if (hash2(x, y, seed ^ 0x9e37) < (d > 200 ? 0.03 : 0.02)) return T.ORE;
       const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
       if (dd > 900) return T.ROCK4;
       if (dd > 480) return T.ROCK3;
@@ -831,9 +870,20 @@
 
     // tools: mouse uses LMB dig / RMB place; touch taps a block to dig it
     // or taps air to build there — the palette picks which block gets built.
+    // The LAYER toggle (Q / ⧉ button) picks where dig & build happen:
+    // the solid FRONT, or the walk-through BACK (placed there, any block
+    // renders darker and you can walk straight past it).
     // INVENTORY: you start with NOTHING — blocks come from digging them
     // (grass gives dirt). Slot badges show how many you hold.
     let palette = T.DIRT;
+    let layer = 0;               // 0 = front, 1 = back
+    function setLayer(l) {
+      layer = l ? 1 : 0;
+      el.btnLayer.textContent = layer ? "⧉ Back" : "⧉ Front";
+      el.btnLayer.setAttribute("aria-pressed", layer ? "1" : "0");
+      el.btnLayer.classList.toggle("on", layer === 1);
+    }
+    function toggleLayer() { setLayer(layer === 1 ? 0 : 1); }
     const inv = new Map();       // tile -> count held
     const DROP = { 1: T.DIRT };  // grass drops dirt; everything else drops itself
     function invAdd(v, n) { inv.set(v, (inv.get(v) || 0) + n); refreshSlots(); }
@@ -854,8 +904,9 @@
     }
 
     // ── overlay + chunk caches ──
-    const overlay = new Map();   // "x,y" -> tile (server mods + live edits)
-    const chunkData = new Map(); // "cx,cy" -> Uint8Array
+    const overlay = new Map();   // "x,y" -> FRONT tile (server mods + live edits)
+    const overlayB = new Map();  // "x,y" -> BACK tile (placed walls, dug trunks)
+    const chunkData = new Map(); // "cx,cy" -> Uint8Array (front layer only)
     const chunkTex = new Map();  // "cx,cy,res" -> canvas
     const lru = [];              // chunk texture keys, most-recent last
     const LRU_BYTES = 96 << 20;  // texture memory budget (~96 MB)
@@ -865,6 +916,11 @@
       const v = overlay.get((x | 0) + "," + (y | 0));
       return v === undefined ? tileAt(x, y) : v;
     }
+    function getBack(x, y) {
+      const v = overlayB.get((x | 0) + "," + (y | 0));
+      return v === undefined ? backAt(x, y) : v;
+    }
+    // only the FRONT layer collides — back walls are walk-through
     const solid = (tx, ty) => getTile(tx, ty) !== T.AIR;
 
     function getChunkData(cx, cy) {
@@ -1064,20 +1120,37 @@
       return 1 - (world.h - 8 - wy) / 15;
     }
 
-    function paintTile(g2, lx, ly, v, wx, wy, res) {
+    // one cell = BACK wall (same texture, multiplied down — "a little
+    // darker", slightly cool, lava-warmed from below) + FRONT block on top.
+    const BACKDARK = [0.58, 0.56, 0.62]; // the shade that sits walls "behind"
+    function paintCell(g2, lx, ly, v, wx, wy, res) {
       const px = lx * res, py = ly * res;
       g2.clearRect(px, py, res, res);
-      if (v === T.AIR) {
-        if (wy >= heightAt(wx)) { // underground: dark "wall" behind air…
-          const gl = lavaGlowAt(wx, wy);   // …warmed by lava from below
-          const j = hash2(wx, wy, 17);
-          g2.fillStyle = gl > 0
-            ? "hsl(18 82% " + (9 + gl * 42 + j * 9) + "%)"
-            : "hsl(228 26% " + (9 + j * 4) + "%)";
-          g2.fillRect(px, py, res, res);
-        }
-        return;
+      const bv = getBack(wx, wy);
+      if (bv !== T.AIR) {
+        g2.drawImage(tileTexFor(bv, wx, wy, res), px, py);
+        const tn = worldTint(wx, wy);
+        const gl = lavaGlowAt(wx, wy); // walls above the lava catch its glow
+        const dr = clamp(tn[0], 0, 1.2) * (BACKDARK[0] + gl * 0.40);
+        const dg = clamp(tn[1], 0, 1.2) * (BACKDARK[1] + gl * 0.16);
+        const db = clamp(tn[2], 0, 1.2) * (BACKDARK[2] - gl * 0.34);
+        g2.globalCompositeOperation = "multiply";
+        g2.fillStyle = "rgb(" + (clamp(dr, 0, 1) * 255 | 0) + "," +
+                              (clamp(dg, 0, 1) * 255 | 0) + "," +
+                              (clamp(db, 0, 1) * 255 | 0) + ")";
+        g2.fillRect(px, py, res, res);
+        g2.globalCompositeOperation = "source-over";
+      } else if (v === T.AIR && wy >= heightAt(wx)) {
+        // no wall at all (a placed back block was dug out): the old dark
+        // void, still lit by lava from below
+        const gl = lavaGlowAt(wx, wy);
+        const j = hash2(wx, wy, 17);
+        g2.fillStyle = gl > 0
+          ? "hsl(18 82% " + (9 + gl * 42 + j * 9) + "%)"
+          : "hsl(228 26% " + (9 + j * 4) + "%)";
+        g2.fillRect(px, py, res, res);
       }
+      if (v === T.AIR) return;
       g2.drawImage(tileTexFor(v, wx, wy, res), px, py);
       const tn = worldTint(wx, wy); // global perlin colour drift
       g2.globalCompositeOperation = "multiply";
@@ -1114,37 +1187,42 @@
       const x0 = cx * CH, y0 = cy * CH;
       for (let ly = 0; ly < CH; ly++)
         for (let lx = 0; lx < CH; lx++)
-          paintTile(g2, lx, ly, data[ly * CH + lx], x0 + lx, y0 + ly, res);
+          paintCell(g2, lx, ly, data[ly * CH + lx], x0 + lx, y0 + ly, res);
       chunkTex.set(k, c);
       touchLRU(k);
       return c;
     }
-    function repaintTile(wx, wy, v) {
+    // repaint one cell (both layers) in every cached chunk resolution + overview
+    function repaintCellEverywhere(wx, wy) {
+      const cx = Math.floor(wx / CH), cy = Math.floor(wy / CH);
+      for (const res of TEXRES) {
+        const c = chunkTex.get(cx + "," + cy + "," + res);
+        if (c) paintCell(c.getContext("2d"), wx - cx * CH, wy - cy * CH, getTile(wx, wy), wx, wy, res);
+      }
+      patchOverview(wx, wy);
+    }
+    function repaintTile(wx, wy, v) { // FRONT edit
       const cx = Math.floor(wx / CH), cy = Math.floor(wy / CH);
       const d = chunkData.get(cx + "," + cy);
       if (d) d[(wy - cy * CH) * CH + (wx - cx * CH)] = v;
-      for (const res of TEXRES) {
-        const c = chunkTex.get(cx + "," + cy + "," + res);
-        if (c) paintTile(c.getContext("2d"), wx - cx * CH, wy - cy * CH, v, wx, wy, res);
-      }
-      patchOverview(wx, wy);
-      // air tiles ABOVE carry the lava glow → they depend on this tile too
+      repaintCellEverywhere(wx, wy);
+      // air cells ABOVE carry the lava glow → they depend on this tile too
       // (glow travels up to 14 rows through connected air)
       lavaGlowTop.delete(wx);
       for (let k = 1; k <= 14; k++) {
         const yy = wy - k;
         if (yy < 0 || getTile(wx, yy) !== T.AIR) break;
-        const cx2 = Math.floor(wx / CH), cy2 = Math.floor(yy / CH);
-        for (const res of TEXRES) {
-          const c = chunkTex.get(cx2 + "," + cy2 + "," + res);
-          if (c) paintTile(c.getContext("2d"), wx - cx2 * CH, yy - cy2 * CH, T.AIR, wx, yy, res);
-        }
-        patchOverview(wx, yy);
+        repaintCellEverywhere(wx, yy);
       }
     }
-    function setTileLocal(x, y, v) {
-      overlay.set(x + "," + y, v);
-      repaintTile(x, y, v);
+    function setTileLocal(x, y, v, lyr) {
+      if (lyr === 1) { // BACK edit: no chunk data, no glow change — just repaint
+        overlayB.set(x + "," + y, v);
+        repaintCellEverywhere(x, y);
+      } else {
+        overlay.set(x + "," + y, v);
+        repaintTile(x, y, v);
+      }
     }
 
     // ── full-world overview for deep zoom-out: 1 px per BLOCK, REAL
@@ -1178,10 +1256,20 @@
           const hh = heightAt(x), ox = x - s0;
           for (let y = 0; y < H; y++) {
             if (y < hh - 9) continue;      // high sky (above any crown) → transparent
-            const v = tileAt(x, y);        // single source of truth: trees,
-            if (v === T.AIR) {             // caves, layers, lava all included
-              if (y < hh) continue;        // sky around trees → transparent
-              const i = (y * w + ox) * 4;  // cave hole: dark wall, lava-lit from below
+            const v = tileAt(x, y);        // single source of truth: caves,
+            if (v === T.AIR) {             // layers, lava all included
+              const bv = backAt(x, y);     // a hole shows its back wall
+              if (bv !== T.AIR) {
+                const i = (y * w + ox) * 4;
+                const c = blockAvgColor(bv, x, y), tn = worldTint(x, y);
+                d[i]     = c[0] * tn[0] * BACKDARK[0];
+                d[i + 1] = c[1] * tn[1] * BACKDARK[1];
+                d[i + 2] = c[2] * tn[2] * BACKDARK[2];
+                d[i + 3] = 255;
+                continue;
+              }
+              if (y < hh) continue;        // open sky → transparent
+              const i = (y * w + ox) * 4;  // no wall: dark void, lava-lit
               const gl = lavaGlowAt(x, y);
               const j = (hash2(x, y, 53) - 0.5) * 6;
               if (gl > 0) { // dark blue → hot orange, stronger nearer the lava
@@ -1204,12 +1292,13 @@
         t.ctx.putImageData(img, s0 - t.x0, 0);
       }
       ovBuiltCol = c1;
-      // overlay edits whose column just got baked → patch them on top
-      for (const k of overlay.keys()) {
-        const ci = k.indexOf(",");
-        const ex = +k.slice(0, ci);
-        if (ex >= c0 && ex < c1) paintOvPixel(ex, +k.slice(ci + 1), overlay.get(k));
-      }
+      // overlay edits (both layers) whose column just got baked → patch on top
+      for (const map of [overlay, overlayB])
+        for (const k of map.keys()) {
+          const ci = k.indexOf(",");
+          const ex = +k.slice(0, ci);
+          if (ex >= c0 && ex < c1) paintOvPixel(ex, +k.slice(ci + 1));
+        }
     }
     function bakeOverviewSome() { // bake within a frame budget
       if (ovBuiltCol >= world.w) return;
@@ -1217,16 +1306,26 @@
       do { bakeOverviewSlice(32); }
       while (ovBuiltCol < world.w && performance.now() - t0 < 20);
     }
-    function paintOvPixel(wx, wy, v) {
+    function paintOvPixel(wx, wy) { // reads BOTH layers live
       const t = ovTiles[(wx / OVTW) | 0];
       if (!t || wx < 0 || wx >= world.w || wy < 0 || wy >= world.h) return;
-      if (v === T.AIR && wy < heightAt(wx))
-        t.ctx.clearRect(wx - t.x0, wy, 1, 1);
-      else if (v === T.AIR) {
-        const gl = lavaGlowAt(wx, wy);
-        const r = 16 + 239 * gl, g = 20 + 104 * gl, b = 32 + 2 * gl;
-        t.ctx.fillStyle = "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")";
-        t.ctx.fillRect(wx - t.x0, wy, 1, 1);
+      const v = getTile(wx, wy);
+      if (v === T.AIR) {
+        const bv = getBack(wx, wy);
+        if (bv !== T.AIR) { // back wall: the block's color, shaded down
+          const c = blockAvgColor(bv, wx, wy), tn = worldTint(wx, wy);
+          t.ctx.fillStyle = "rgb(" + (c[0] * tn[0] * BACKDARK[0] | 0) + "," +
+                                     (c[1] * tn[1] * BACKDARK[1] | 0) + "," +
+                                     (c[2] * tn[2] * BACKDARK[2] | 0) + ")";
+          t.ctx.fillRect(wx - t.x0, wy, 1, 1);
+        } else if (wy < heightAt(wx)) {
+          t.ctx.clearRect(wx - t.x0, wy, 1, 1);
+        } else {
+          const gl = lavaGlowAt(wx, wy);
+          const r = 16 + 239 * gl, g = 20 + 104 * gl, b = 32 + 2 * gl;
+          t.ctx.fillStyle = "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")";
+          t.ctx.fillRect(wx - t.x0, wy, 1, 1);
+        }
       } else {
         const c = blockAvgColor(v, wx, wy), tn = worldTint(wx, wy);
         t.ctx.fillStyle = "rgb(" + (c[0] * tn[0] | 0) + "," + (c[1] * tn[1] | 0) + "," + (c[2] * tn[2] | 0) + ")";
@@ -1235,7 +1334,7 @@
     }
     function patchOverview(wx, wy) {
       if (!ovTiles.length || wx >= ovBuiltCol) return; // unbaked columns catch it later
-      paintOvPixel(wx, wy, getTile(wx, wy));
+      paintOvPixel(wx, wy);
     }
 
     // ── connection ──
@@ -1247,17 +1346,18 @@
       el.btnGhost.classList.toggle("hidden", !tester);
       setGhost(false);
       document.querySelector(".keys-hint").textContent = tester
-        ? "A/D move · Space jump · LMB dig / RMB place · 1–8 pick · +/− zoom · ghost: Space/S or joystick"
-        : "A/D move · Space jump · LMB dig / RMB place · dig blocks to collect them · 1–8 pick · +/− zoom";
+        ? "A/D move · Space jump · LMB dig / RMB place · Q front/back layer · 1–8 pick · +/− zoom · ghost: Space/S or joystick"
+        : "A/D move · Space jump · LMB dig / RMB place · Q front/back layer · dig blocks to collect them · 1–8 pick · +/− zoom";
       wsUrl = workerUrl.replace(/^http/, "ws") +
         "/ws?room=" + encodeURIComponent(roomName) +
         "&name=" + encodeURIComponent(name) +
         "&id=" + encodeURIComponent(identity);
       active = true; hasWorld = false;
-      overlay.clear(); chunkData.clear(); chunkTex.clear(); lru.length = 0; lruBytes = 0;
+      overlay.clear(); overlayB.clear();
+      chunkData.clear(); chunkTex.clear(); lru.length = 0; lruBytes = 0;
       hcache.clear(); lavaGlowTop.clear(); ovTiles = []; ovBuiltCol = 0;
-      pxm = 48; inv.clear(); refreshSlots(); setPalette(T.DIRT);
-      mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0;
+      pxm = 48; inv.clear(); refreshSlots(); setPalette(T.DIRT); setLayer(0);
+      mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0; mine.layer = 0;
       wireInput();
       connectWs();
       lastTs = 0; acc = 0;
@@ -1291,8 +1391,11 @@
         if (m.t === "init") {
           world = m.world || world;
           seed = m.seed | 0 || 1;
-          overlay.clear(); chunkData.clear(); chunkTex.clear(); lru.length = 0; lruBytes = 0; hcache.clear(); lavaGlowTop.clear();
-          for (const e of (m.mods || [])) overlay.set(e[0] + "," + e[1], e[2]);
+          overlay.clear(); overlayB.clear();
+          chunkData.clear(); chunkTex.clear(); lru.length = 0; lruBytes = 0; hcache.clear(); lavaGlowTop.clear();
+          // mods are [x, y, v] (front, legacy) or [x, y, v, layer]
+          for (const e of (m.mods || []))
+            (e[3] === 1 ? overlayB : overlay).set(e[0] + "," + e[1], e[2]);
           buildOverview();
           const self = (m.players || {})[m.you];
           if (self) { me.x = self.x; me.y = self.y; me.vy = 0; me.grounded = false; }
@@ -1314,7 +1417,7 @@
           const r = remotes.get(m.id);
           if (r) { r.tx = m.x; r.ty = m.y; }
         } else if (m.t === "b") {
-          setTileLocal(m.x, m.y, m.v);
+          setTileLocal(m.x, m.y, m.v, m.l === 1 ? 1 : 0);
         }
       };
       sock.onclose = () => {
@@ -1415,17 +1518,20 @@
 
       // mining / placing while held
       if (mine.held && mine.action === "dig" && mine.tx >= 0) {
-        if (!validDigTarget(mine.tx, mine.ty)) {
+        if (!validDigTarget(mine.tx, mine.ty, mine.layer)) {
           mine.prog = Math.max(0, mine.prog - dt * 2.5); // wandered off → heals
         } else {
-          mine.prog += dt / (HARD[getTile(mine.tx, mine.ty)] || 1);
+          const hv = mine.layer === 1 ? getBack(mine.tx, mine.ty) : getTile(mine.tx, mine.ty);
+          mine.prog += dt / (HARD[hv] || 1);
           if (mine.prog >= 1) {
-            invAdd(DROP[getTile(mine.tx, mine.ty)] || getTile(mine.tx, mine.ty), 1);
-            setTileLocal(mine.tx, mine.ty, T.AIR); // optimistic; server confirms
-            if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "dig", x: mine.tx, y: mine.ty }));
+            invAdd(mine.layer === 1 ? hv : (DROP[hv] || hv), 1);
+            setTileLocal(mine.tx, mine.ty, T.AIR, mine.layer); // optimistic; server confirms
+            if (ws && ws.readyState === 1)
+              ws.send(JSON.stringify({ t: "dig", x: mine.tx, y: mine.ty, l: mine.layer }));
             mine.prog = 0;
             const tx2 = Math.floor(mine.wx), ty2 = Math.floor(mine.wy);
-            if (validDigTarget(tx2, ty2)) { mine.tx = tx2; mine.ty = ty2; }
+            const dl = pickDigLayer(tx2, ty2);
+            if (dl >= 0) { mine.tx = tx2; mine.ty = ty2; mine.layer = dl; }
             else mine.tx = -1;
           }
         }
@@ -1456,26 +1562,55 @@
     }
 
     // ── dig & place ──
-    const mine = { pid: -1, action: "dig", tx: -1, ty: 0, wx: 0, wy: 0, prog: 0, held: false, placeT: 0 };
+    const mine = { pid: -1, action: "dig", tx: -1, ty: 0, wx: 0, wy: 0, prog: 0, held: false, placeT: 0, layer: 0 };
 
     function inReach(tx, ty) {
       const dx = tx + 0.5 - (me.x + PW / 2), dy = ty + 0.5 - (me.y + PH / 2);
       const r = world.reach + 0.3;
       return dx * dx + dy * dy <= r * r;
     }
-    function validDigTarget(tx, ty) {
+    function validDigTarget(tx, ty, lyr) {
+      if (!inReach(tx, ty)) return false;
+      if (lyr === 1) {
+        // back: placed walls & tree trunks can be dug out (trunks are how
+        // you get wood now); natural terrain walls are forever
+        const bv = getBack(tx, ty);
+        if (bv === T.AIR || bv === T.BEDROCK || bv === T.LAVA) return false;
+        const mv = overlayB.get(tx + "," + ty);
+        return mv !== undefined ? mv !== T.AIR : bv === T.WOOD;
+      }
       const v = getTile(tx, ty);
-      return v !== T.AIR && v !== T.BEDROCK && v !== T.LAVA && inReach(tx, ty);
+      return v !== T.AIR && v !== T.BEDROCK && v !== T.LAVA;
+    }
+    // which layer a dig actually hits: the toggle decides, but FRONT mode
+    // falls through to the back when no front block is there (trunks!)
+    function pickDigLayer(tx, ty) {
+      if (layer === 1) return validDigTarget(tx, ty, 1) ? 1 : -1;
+      if (validDigTarget(tx, ty, 0)) return 0;
+      if (validDigTarget(tx, ty, 1)) return 1;
+      return -1;
     }
     function tryPlace(tx, ty) {
       if ((inv.get(palette) || 0) <= 0) return; // you can only place what you dug
-      if (getTile(tx, ty) !== T.AIR || !inReach(tx, ty)) return;
+      if (!inReach(tx, ty)) return;
+      if (layer === 1) {
+        // back wall: goes into any empty back cell, is walk-through, so
+        // there is no "don't entomb a player" check here
+        if (getBack(tx, ty) !== T.AIR) return;
+        setTileLocal(tx, ty, palette, 1); // optimistic; server confirms
+        invAdd(palette, -1);
+        if (ws && ws.readyState === 1)
+          ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: palette, l: 1 }));
+        return;
+      }
+      if (getTile(tx, ty) !== T.AIR) return;
       const hit = (p) => tx < p.x + PW && tx + 1 > p.x && ty < p.y + PH && ty + 1 > p.y;
       if (hit(me)) return;
       for (const r of remotes.values()) if (hit(r)) return;
-      setTileLocal(tx, ty, palette); // optimistic; server confirms
+      setTileLocal(tx, ty, palette, 0); // optimistic; server confirms
       invAdd(palette, -1);
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: palette }));
+      if (ws && ws.readyState === 1)
+        ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: palette, l: 0 }));
     }
     function tileFromEvent(e) {
       const wx = camX + e.clientX / pxm, wy = camY + e.clientY / pxm;
@@ -1819,6 +1954,7 @@
         else if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
           input.jump = true; e.preventDefault();
         }
+        else if (e.key === "q" || e.key === "Q") toggleLayer(); // front ↔ back
         else if (e.key >= "1" && e.key <= "8") {
           const vis = [...document.querySelectorAll(".slot")]
             .filter((b) => !b.classList.contains("hidden"));
@@ -1880,17 +2016,18 @@
           else if (e.button === 0) action = "dig";
           else return;
         } else {
-          // touch & pen: what you tap chooses — a block means dig it,
-          // air means build the palette block there
+          // touch & pen: what you tap chooses — a diggable block (front
+          // first, then the back) means dig it, otherwise build there
           if (e.button !== 0 && e.pointerType !== "touch") return;
-          action = getTile(tx, ty) === T.AIR ? "place" : "dig";
+          action = pickDigLayer(tx, ty) >= 0 ? "dig" : "place";
         }
         mine.pid = e.pointerId; mine.action = action; mine.held = true; mine.placeT = 0;
         if (action === "dig") {
-          if (validDigTarget(tx, ty)) { mine.tx = tx; mine.ty = ty; mine.prog = 0; }
+          const dl = pickDigLayer(tx, ty); // toggle picks, front falls through to back
+          if (dl >= 0) { mine.tx = tx; mine.ty = ty; mine.layer = dl; mine.prog = 0; }
           else mine.tx = -1;
         } else {
-          mine.tx = tx; mine.ty = ty;
+          mine.tx = tx; mine.ty = ty; mine.layer = layer;
           tryPlace(tx, ty);
         }
         try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
@@ -1902,7 +2039,8 @@
         if (mine.action === "dig") {
           if (tx !== mine.tx || ty !== mine.ty) {
             mine.prog = 0; // moved to a new tile → the old one heals
-            if (validDigTarget(tx, ty)) { mine.tx = tx; mine.ty = ty; }
+            const dl = pickDigLayer(tx, ty);
+            if (dl >= 0) { mine.tx = tx; mine.ty = ty; mine.layer = dl; }
             else mine.tx = -1;
           }
         } else {
@@ -1948,15 +2086,18 @@
     }
 
     return {
-      start, stop, zoomIn, zoomOut, setPalette,
+      start, stop, zoomIn, zoomOut, setPalette, toggleLayer,
       isActive: () => active,
       hasWorld: () => hasWorld,
       remoteCount: () => remotes.size,
       _debug: {
         me, remotes, meAnim, get world() { return world; }, get seed() { return seed; },
-        get pxm() { return pxm; }, getTile, tileAt: (x, y) => tileAt(x, y),
-        heightAt, overlay, mine,
-        setTile: (x, y, v) => setTileLocal(x, y, v), blockAvgColor,
+        get pxm() { return pxm; }, getTile, getBack, tileAt: (x, y) => tileAt(x, y),
+        backAt: (x, y) => backAt(x, y),
+        heightAt, overlay, overlayB, mine,
+        get layer() { return layer; }, setLayer,
+        setTile: (x, y, v) => setTileLocal(x, y, v, 0),
+        setBack: (x, y, v) => setTileLocal(x, y, v, 1), blockAvgColor,
         get camX() { return camX; }, get camY() { return camY; },
         get ovTiles() { return ovTiles; }, get ovBuiltCol() { return ovBuiltCol; },
         get ovMode() { return pxm <= 2; },
