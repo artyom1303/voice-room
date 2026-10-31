@@ -44,14 +44,22 @@ const WORLD = {
 };
 const PW = 0.8, PH = 1.8; // player collision box (m)
 
-// Tile types (T_ORE = gold)
+// Tile types (T_ORE = gold; COAL/COAL2/COAL3/COAL4 = fuel ×1/×2/×4/×8)
 const T_AIR = 0, T_GRASS = 1, T_DIRT = 2, T_STONE = 3, T_ORE = 4, T_WOOD = 5, T_BEDROCK = 6,
       T_LEAVES = 7, T_ROCK2 = 8, T_ROCK3 = 9, T_ROCK4 = 10, T_LAVA = 11,
-      T_COPPER = 12, T_IRON = 13, T_DIAMOND = 14;
+      T_COPPER = 12, T_IRON = 13, T_DIAMOND = 14,
+      T_DOOR = 15, T_DOOR_OPEN = 16, T_LADDER = 17, T_TABLE = 18, T_CHAIR = 19,
+      T_FURNACE = 20, T_SAND = 21, T_GLASS = 22,
+      T_COAL = 23, T_COAL2 = 24, T_COAL3 = 25, T_COAL4 = 26,
+      T_RAILING = 27;
 // Seconds to mine per type (bedrock/lava = unbreakable, not in the table)
 const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1, 7: 0.3, 8: 3.2, 9: 5.5, 10: 9,
-               12: 2.0, 13: 3.4, 14: 5.0 };
-const PLACEABLE = { 2: 1, 3: 1, 4: 1, 5: 1, 7: 1, 8: 1, 9: 1, 10: 1, 12: 1, 13: 1, 14: 1 };
+               12: 2.0, 13: 3.4, 14: 5.0, 15: 1.4, 16: 1.4, 17: 0.6, 18: 1.2,
+               19: 0.9, 20: 3.0, 21: 0.5, 22: 0.9, 23: 1.8, 24: 3.0, 25: 5.0,
+               26: 8.0, 27: 0.8 };
+const PLACEABLE = { 2: 1, 3: 1, 4: 1, 5: 1, 7: 1, 8: 1, 9: 1, 10: 1, 12: 1, 13: 1, 14: 1,
+                    15: 1, 17: 1, 18: 1, 19: 1, 20: 1, 21: 1, 22: 1, 23: 1, 24: 1,
+                    25: 1, 26: 1, 27: 1 }; // (16 = open door: only via tapping)
 
 // ── Deterministic terrain (KEEP IN SYNC with index.html) ──────────
 function hash2(x, y, seed) {
@@ -116,6 +124,8 @@ function crownAt(seed, x, y) { // front layer: the leafy crown, else AIR
   }
   return T_AIR;
 }
+// sandy patches: whole columns of ground turn to sand — broad noise blobs
+function sandCol(seed, x) { return fbm1(x / 260, seed + 61, 2) > 0.62; }
 function tileAt(seed, x, y) {
   x |= 0; y |= 0;
   if (y < 0) return T_AIR;
@@ -125,17 +135,20 @@ function tileAt(seed, x, y) {
   if (y < h) return crownAt(seed, x, y);       // sky band: crowns up front
   const d = y - h;
   if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T_AIR; // caves
-  if (d === 0) return T_GRASS;
-  if (d < 5) return T_DIRT;
+  const sand = sandCol(seed, x);
+  if (d === 0) return sand ? T_SAND : T_GRASS;
+  if (d < 5) return sand ? T_SAND : T_DIRT;
   // rock grows harder & darker with depth — perlin-wobbled boundaries —
   // and each rock layer carries its own ore: copper in stone, iron in
-  // slate, gold in dark rock, diamond in void rock
+  // slate, gold in dark rock, diamond in void rock. COAL rides along,
+  // one better grade per layer (lignite → coal → bituminous → anthracite).
   const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
   const or = hash2(x, y, seed ^ 0x9e37);
-  if (dd > 900) return or < 0.020 ? T_DIAMOND : T_ROCK4;
-  if (dd > 480) return or < 0.025 ? T_ORE : T_ROCK3;
-  if (dd > 190) return or < 0.025 ? T_IRON : T_ROCK2;
-  return or < 0.025 ? T_COPPER : T_STONE;
+  const cr = hash2(x, y, seed ^ 0x5bd1);
+  if (dd > 900) return or < 0.020 ? T_DIAMOND : cr < 0.030 ? T_COAL4 : T_ROCK4;
+  if (dd > 480) return or < 0.025 ? T_ORE : cr < 0.030 ? T_COAL3 : T_ROCK3;
+  if (dd > 190) return or < 0.025 ? T_IRON : cr < 0.030 ? T_COAL2 : T_ROCK2;
+  return or < 0.025 ? T_COPPER : cr < 0.030 ? T_COAL : T_STONE;
 }
 // Natural BACK layer (KEEP IN SYNC with index.html): terrain always has
 // a back wall — the same strata as the front but with no cave hollows —
@@ -148,7 +161,7 @@ function backAt(seed, x, y) {
   const h = heightAt(seed, x);
   if (y < h) return trunkAt(seed, x, y);       // sky band: just trunks
   const d = y - h;
-  if (d < 5) return T_DIRT;                    // dirt wall behind grass too
+  if (d < 5) return sandCol(seed, x) ? T_SAND : T_DIRT; // wall behind grass too
   // walls are plain strata — no ore in the back layer
   const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
   if (dd > 900) return T_ROCK4;
@@ -274,6 +287,7 @@ function b64urlBytes(bytes) {
 //                   { t:"hb" }                    heartbeat
 //                   { t:"dig", x, y, l }          break tile (validated)
 //                   { t:"place", x, y, v, l }     place tile (validated)
+//                   { t:"door", x, y, l }         swing a joined door open/shut
 //  Here → client:   { t:"init", you, world, seed, players, mods }
 //                   { t:"+", id, name, x, y }     someone joined
 //                   { t:"p", id, x, y }           someone moved
@@ -460,6 +474,39 @@ export class GameRoom {
       p.lastPlace = now;
       this.setTile(x, y, v, 0);
       this.broadcast({ t: "b", x, y, v, l: 0 });
+
+    } else if (m.t === "door") {
+      // tap a door block → the WHOLE joined door swings (blocks touching
+      // side-to-side or up-and-down are one door). Flood-filled here
+      // authoritatively; every flipped cell is persisted + broadcast.
+      const x = m.x | 0, y = m.y | 0, l = m.l === 1 ? 1 : 0;
+      if (x < 0 || y < 0 || x >= WORLD.w || y >= WORLD.h) return;
+      if (!this.inReach(p, x, y)) { this.correct(ws, x, y, l); return; }
+      const now = Date.now();
+      if (now - (p.lastDoor || 0) < 250) return; // swing rate limit
+      p.lastDoor = now;
+      const get = l === 1 ? (a2, b2) => this.effectiveBack(a2, b2)
+                          : (a2, b2) => this.effective(a2, b2);
+      const doorish = (v) => v === T_DOOR || v === T_DOOR_OPEN;
+      const start = get(x, y);
+      if (!doorish(start)) { this.correct(ws, x, y, l); return; }
+      const target = start === T_DOOR ? T_DOOR_OPEN : T_DOOR;
+      const seen = new Set([x + "," + y]);
+      const queue = [[x, y]];
+      const cells = [];
+      while (queue.length && cells.length < 512) { // 512-cell sanity cap
+        const [cx, cy] = queue.pop();
+        cells.push([cx, cy]);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = cx + dx, ny = cy + dy, k = nx + "," + ny;
+          if (seen.has(k) || !doorish(get(nx, ny))) continue;
+          seen.add(k); queue.push([nx, ny]);
+        }
+      }
+      for (const [cx, cy] of cells) {
+        this.setTile(cx, cy, target, l);
+        this.broadcast({ t: "b", x: cx, y: cy, v: target, l }, a.id);
+      }
     }
   }
 

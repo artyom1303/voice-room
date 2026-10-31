@@ -95,11 +95,16 @@
   .hud { position: fixed; left: 0; right: 0; display: flex; z-index: 5; pointer-events: none; }
   .hud > * { pointer-events: auto; }
   .hud-top { top: 0; padding: 12px 14px; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .hud-card { background: rgba(13,18,38,.72); border: 1px solid var(--border);
-    border-radius: 12px; padding: 8px 14px; backdrop-filter: blur(8px); }
-  .hud-card h1 { font-size: 17px; word-break: break-all; }
-  .hud-card .sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
-  .hud-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  /* world name + player count: one plain semitransparent string, no card */
+  #world-label { font-size: 15px; font-weight: 650; color: var(--text);
+    opacity: .25; padding: 4px 2px; word-break: break-all; pointer-events: none; }
+  .hud-actions { display: flex; gap: 14px; flex-shrink: 0; align-items: center; }
+  /* bare icon buttons: 25% opacity, no container, no outline */
+  .hud-txt { background: none; border: none; padding: 4px 2px; color: var(--text);
+    font-size: 22px; line-height: 1; opacity: .25; cursor: pointer; }
+  .hud-txt:hover, .hud-txt.on { opacity: .8; }
+  #btn-ghost { font-size: 14px; font-weight: 700; }
+  .craft-open { font-size: 24px; }
   .menu-overlay { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
     background: rgba(5,8,18,.55); backdrop-filter: blur(4px); }
   .menu-overlay.hidden { display: none; }
@@ -113,39 +118,75 @@
   .menu-row input { width: 20px; height: 20px; accent-color: var(--good); flex-shrink: 0; cursor: pointer; }
   .hud-status { position: fixed; top: 76px; left: 0; right: 0; z-index: 5;
     pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.7); }
-  .hud-bottom { bottom: 0; padding: 12px 14px 14px; flex-direction: column; gap: 10px; align-items: stretch; }
+  .hud-bottom { bottom: 0; padding: 12px 14px 14px; flex-direction: column; gap: 6px; align-items: stretch; }
   .hud-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; pointer-events: none; }
   .hud-row > * { pointer-events: auto; }
-  .pill { display: flex; align-items: center; gap: 8px; background: rgba(20,26,46,.66);
-    border: 1px solid var(--border); backdrop-filter: blur(8px); border-radius: 99px; padding: 7px 10px; }
-  .pill-btn { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,.08);
-    border: 1px solid var(--border); color: var(--text); font-size: 18px; line-height: 1;
-    display: grid; place-items: center; padding: 0; }
-  .slot { position: relative; width: 34px; height: 34px; border-radius: 9px; border: 2px solid rgba(255,255,255,.18);
-    padding: 0; flex-shrink: 0; }
-  .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
-  .slot .n { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: 700;
+  .hud-mid { display: flex; align-items: flex-end; gap: 10px; }
+  /* zoom: two plain square buttons, 25% opacity */
+  .sq-btn { width: 46px; height: 46px; border-radius: 10px; border: none; padding: 0;
+    background: var(--text); color: #0b0f1d; font-size: 24px; font-weight: 700;
+    line-height: 1; opacity: .25; display: grid; place-items: center; }
+  .sq-btn:hover { opacity: .6; }
+
+  /* ── inventory ribbon: a row of pure 25%-opacity icons, no outlines or
+     containers, filling RIGHT → LEFT, max 10, whole screen width.
+     Selected = 100% opacity + 110% size; click again deselects. ── */
+  #ribbon { display: flex; flex-direction: row-reverse; justify-content: flex-start;
+    align-items: center; gap: 4px; width: 100%; min-height: 40px; pointer-events: auto; }
+  .ritem { position: relative; width: 34px; height: 34px; border: none; background: none;
+    padding: 0; opacity: .25; flex-shrink: 0; cursor: pointer;
+    transition: opacity .12s, transform .12s; }
+  .ritem.sel { opacity: 1; transform: scale(1.1); }
+  .ritem .sw { position: absolute; inset: 3px; border-radius: 7px; }
+  .ritem .pick { position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 22px; }
+  .ritem .n { position: absolute; right: 2px; bottom: 0; font-size: 11px; font-weight: 700;
     color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9); pointer-events: none; }
 
-
-  .pad { display: flex; gap: 10px; }
-  /* ghost-mode joystick (testerworld): replaces the walk/jump pads */
-  #joy { width: 132px; height: 132px; border-radius: 50%; background: rgba(20,26,46,.5);
-    border: 1px solid var(--border); backdrop-filter: blur(8px); position: relative;
-    touch-action: none; user-select: none; -webkit-user-select: none; flex-shrink: 0; }
-  #joy-knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px;
-    border-radius: 50%; background: rgba(108,140,255,.45); border: 1px solid rgba(108,140,255,.85);
-    transform: translate(-50%, -50%); pointer-events: none; }
-  .btn-ghost.on { background: rgba(108,140,255,.4); border-color: rgba(108,140,255,.85);
-    color: #fff; }
-  /* layer toggle: a simple compact round button, the word fitted inside */
-  #btn-layer { width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+  /* front/back toggle: right above the ribbon, at the right */
+  #btn-layer { align-self: flex-end; width: 46px; height: 46px; border-radius: 50%;
+    flex-shrink: 0; margin-right: 2px;
     padding: 0; background: rgba(20,26,46,.66); border: 1px solid var(--border);
     backdrop-filter: blur(8px); color: var(--text);
     font-size: 10.5px; font-weight: 700; letter-spacing: .2px; }
   #btn-layer.on { background: rgba(108,140,255,.45); border-color: rgba(108,140,255,.9);
     color: #fff; }
+
+  /* ── flat walk joystick: rectangular groove + knob, horizontal only.
+     The pad around the groove (above = jump snap, below = crouch snap)
+     is part of the joystick. Blue haze marks a maxed direction. ── */
+  #flatjoy { width: 170px; height: 118px; touch-action: none; user-select: none;
+    -webkit-user-select: none; position: relative; flex-shrink: 0; }
+  #fj-groove { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+    height: 34px; border-radius: 99px; background: rgba(20,26,46,.5);
+    border: 1px solid var(--border); backdrop-filter: blur(8px); }
+  #fj-knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px;
+    border-radius: 50%; background: rgba(108,140,255,.45); border: 1px solid rgba(108,140,255,.85);
+    transform: translate(-50%, -50%); pointer-events: none; }
+  .fj-haze { position: absolute; top: 50%; width: 30px; height: 30px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(108,160,255,.85), transparent 70%);
+    transform: translateY(-50%); opacity: 0; pointer-events: none;
+    transition: opacity .1s; }
+  .fj-haze.left { left: -4px; }
+  .fj-haze.right { right: -4px; }
+  .fj-haze.on { opacity: 1; }
+
+  /* ghost-mode round joystick: appears where the tap lands (bottom half of
+     the screen), knob deflection = fly speed, haze at max */
+  #joy { position: fixed; width: 132px; height: 132px; border-radius: 50%;
+    background: rgba(20,26,46,.5); border: 1px solid var(--border);
+    backdrop-filter: blur(8px); z-index: 6;
+    touch-action: none; user-select: none; -webkit-user-select: none; pointer-events: none; }
+  #joy-knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px;
+    border-radius: 50%; background: rgba(108,140,255,.45); border: 1px solid rgba(108,140,255,.85);
+    transform: translate(-50%, -50%); pointer-events: none; }
+  #joy-haze { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px;
+    border-radius: 50%; background: radial-gradient(circle, rgba(108,160,255,.9), transparent 70%);
+    transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
   .menu-btn { width: 100%; margin-top: 8px; text-align: center; }
+  .pill-btn { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,.08);
+    border: 1px solid var(--border); color: var(--text); font-size: 18px; line-height: 1;
+    display: grid; place-items: center; padding: 0; }
   /* crafting book */
   .craft-card { width: min(400px, calc(100vw - 40px)); max-height: 72dvh; overflow-y: auto; }
   .craft-sub { font-size: 12.5px; color: var(--muted); margin: -4px 0 4px; }
@@ -229,52 +270,44 @@
     <canvas id="game-canvas"></canvas>
 
     <div class="hud hud-top">
-      <div class="hud-card">
-        <h1 id="room-name">room</h1>
-        <div class="sub" id="room-count"></div>
-      </div>
+      <div id="world-label"><span id="room-name">room</span> <span id="room-count"></span></div>
       <div class="hud-actions">
-        <button id="btn-ghost" class="btn-ghost hidden" aria-pressed="false" title="Testerworld power: fly freely">Ghost</button>
-        <button id="btn-menu" class="btn-ghost" aria-label="Open menu">⚙ Menu</button>
+        <button id="btn-ghost" class="hud-txt hidden" aria-pressed="false" title="Testerworld power: fly freely">Ghost</button>
+        <button id="btn-menu" class="hud-txt" aria-label="Open menu">☰</button>
       </div>
     </div>
 
     <p id="room-status" class="status hud-status"></p>
-    <div class="keys-hint">A/D move · Space jump · LMB dig / RMB place · Q layer · C craft · dig blocks to collect them · 1–0 pick · +/− zoom</div>
+    <div class="keys-hint">A/D move · Space jump · S crouch · LMB use / RMB place · Q layer · C craft · 1–0 select · +/− zoom</div>
 
     <div class="hud hud-bottom">
+      <!-- front/back sits right above the ribbon, at the right -->
+      <button id="btn-layer" aria-pressed="false"
+              title="Dig &amp; build in the walk-through back layer (Q)">Front</button>
+      <!-- inventory ribbon: pure icons, fills right-to-left -->
+      <div id="ribbon"></div>
       <div class="hud-row">
-        <div class="pill">
-          <button id="btn-zoom-out" class="pill-btn" aria-label="Zoom out">−</button>
-          <button id="btn-zoom-in" class="pill-btn" aria-label="Zoom in">+</button>
+        <!-- flat walk joystick: groove + knob, snap up = jump, down = crouch -->
+        <div id="flatjoy" aria-label="Walk joystick">
+          <div id="fj-groove">
+            <div class="fj-haze left" id="fj-haze-l"></div>
+            <div class="fj-haze right" id="fj-haze-r"></div>
+            <div id="fj-knob"></div>
+          </div>
         </div>
-        <button id="btn-layer" aria-pressed="false"
-                title="Dig &amp; build in the walk-through back layer (Q)">Front</button>
-        <div class="pill" id="slots">
-          <button class="slot sel hidden" data-tile="2" style="background:#6b4a30" aria-label="Place dirt"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="3" style="background:#57617e" aria-label="Place stone"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="12" style="background:#b87333" aria-label="Place copper"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="5" style="background:#8a6238" aria-label="Place wood"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="7" style="background:#3f7a34" aria-label="Place leaves"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="13" style="background:#b6aea2" aria-label="Place iron"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="4" style="background:#a88428" aria-label="Place gold"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="8" style="background:#3d4459" aria-label="Place slate"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="14" style="background:#4ec3d8" aria-label="Place diamond"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="9" style="background:#272b3b" aria-label="Place dark rock"><span class="n">0</span></button>
-          <button class="slot hidden" data-tile="10" style="background:#15171f" aria-label="Place void rock"><span class="n">0</span></button>
+        <div class="hud-mid">
+          <button id="btn-zoom-out" class="sq-btn" aria-label="Zoom out">−</button>
+          <button id="btn-zoom-in" class="sq-btn" aria-label="Zoom in">+</button>
+          <button id="btn-craft" class="hud-txt craft-open" aria-label="Crafting book">📕</button>
+          <button id="btn-mute" class="mic-btn" aria-label="Mute"><span class="mic-fill" id="mic-btn-fill"></span><span class="mic-ico"></span></button>
         </div>
       </div>
-      <div class="hud-row">
-        <div class="pad" id="pad-l">
-          <button id="btn-left" class="pad-btn" aria-label="Move left">◀</button>
-          <button id="btn-right" class="pad-btn" aria-label="Move right">▶</button>
-        </div>
-        <div id="joy" class="hidden" aria-label="Fly joystick"><div id="joy-knob"></div></div>
-        <button id="btn-mute" class="mic-btn" aria-label="Mute"><span class="mic-fill" id="mic-btn-fill"></span><span class="mic-ico"></span></button>
-        <div class="pad" id="pad-r">
-          <button id="btn-jump" class="pad-btn jump" aria-label="Jump">JUMP</button>
-        </div>
-      </div>
+    </div>
+
+    <!-- ghost-mode round joystick: appears where the tap lands -->
+    <div id="joy" class="hidden" aria-label="Fly joystick">
+      <div id="joy-haze"></div>
+      <div id="joy-knob"></div>
     </div>
 
     <!-- in-game menu (⚙ in the top bar) -->
@@ -288,13 +321,12 @@
           <input type="checkbox" id="opt-autostep">
           <span>Auto-jump up 1-block steps while walking</span>
         </label>
-        <button id="btn-craft" class="btn-ghost menu-btn">Crafting book</button>
         <button id="btn-copy" class="btn-ghost menu-btn">Copy invite link</button>
         <button id="btn-leave" class="btn-danger menu-btn">Leave room</button>
       </div>
     </div>
 
-    <!-- crafting book (from the menu, or C) -->
+    <!-- crafting book (📕 button or C) -->
     <div id="craft-overlay" class="menu-overlay hidden">
       <div class="menu-card craft-card">
         <div class="menu-head">
@@ -304,6 +336,19 @@
         <p class="craft-sub">Pickaxes dig faster. Costs are paid from your block inventory.</p>
         <p class="craft-cur" id="craft-cur"></p>
         <div id="craft-list"></div>
+      </div>
+    </div>
+
+    <!-- furnace (tap a furnace block) -->
+    <div id="furn-overlay" class="menu-overlay hidden">
+      <div class="menu-card craft-card">
+        <div class="menu-head">
+          <h2>Furnace</h2>
+          <button id="btn-furn-close" class="pill-btn" aria-label="Close furnace">✕</button>
+        </div>
+        <p class="craft-sub">Melts sand into glass, burning coal. Deeper coal
+          lasts longer: lignite ×1 · coal ×2 · bituminous ×4 · anthracite ×8 smelts a piece.</p>
+        <div id="furn-body"></div>
       </div>
     </div>
   </main>
@@ -338,15 +383,16 @@
     roomStatus: $("room-status"),
     btnMute: $("btn-mute"), btnMuteFill: $("mic-btn-fill"), btnLeave: $("btn-leave"),
     gameCanvas: $("game-canvas"), audioOut: $("audio-out"),
-    btnLeft: $("btn-left"), btnRight: $("btn-right"), btnJump: $("btn-jump"),
     btnZoomIn: $("btn-zoom-in"), btnZoomOut: $("btn-zoom-out"),
     btnMenu: $("btn-menu"), btnMenuClose: $("btn-menu-close"),
     menuOverlay: $("menu-overlay"), optAutostep: $("opt-autostep"),
-    btnLayer: $("btn-layer"),
+    btnLayer: $("btn-layer"), ribbon: $("ribbon"),
     btnCraft: $("btn-craft"), craftOverlay: $("craft-overlay"),
     btnCraftClose: $("btn-craft-close"), craftList: $("craft-list"), craftCur: $("craft-cur"),
-    btnGhost: $("btn-ghost"), padL: $("pad-l"), padR: $("pad-r"),
-    joy: $("joy"), joyKnob: $("joy-knob"),
+    furnOverlay: $("furn-overlay"), furnBody: $("furn-body"), btnFurnClose: $("btn-furn-close"),
+    btnGhost: $("btn-ghost"), flatjoy: $("flatjoy"), fjGroove: $("fj-groove"), fjKnob: $("fj-knob"),
+    fjHazeL: $("fj-haze-l"), fjHazeR: $("fj-haze-r"),
+    joy: $("joy"), joyKnob: $("joy-knob"), joyHaze: $("joy-haze"),
   };
 
   const ICON_MIC_ON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
@@ -377,14 +423,15 @@
   let autoStep = true;         // Menu toggle: hop 1-block steps while walking
   let ghostOn = false;         // testerworld-only: fly through anything
 
-  // testerworld ghost toggle: swap walk pads ↔ fly joystick
+  // testerworld ghost toggle: swap the flat walk joystick ↔ free-fly mode
+  // (in ghost mode a round floating joystick appears wherever you touch
+  // the bottom half of the screen)
   function setGhost(on) {
     ghostOn = on;
     el.btnGhost.classList.toggle("on", on);
     el.btnGhost.setAttribute("aria-pressed", on ? "1" : "0");
-    el.padL.classList.toggle("hidden", on);
-    el.padR.classList.toggle("hidden", on);
-    el.joy.classList.toggle("hidden", !on);
+    el.flatjoy.classList.toggle("hidden", on);
+    if (!on) el.joy.classList.add("hidden");
   }
 
 
@@ -680,7 +727,7 @@
     let n = 0;
     if (Game.isActive() && Game.hasWorld()) n = 1 + Game.remoteCount();
     else if (room) n = 1 + room.remoteParticipants.size;
-    if (n > 0) el.roomCount.textContent = "👤 " + n;
+    el.roomCount.textContent = n > 0 ? "👤 " + n : "";
   }
 
   function init() {
@@ -715,6 +762,14 @@
     el.craftOverlay.addEventListener("click", (e) => {
       if (e.target === el.craftOverlay) Game.toggleCraft();
     });
+    el.btnFurnClose.addEventListener("click", Game.toggleFurnace);
+    el.furnOverlay.addEventListener("click", (e) => {
+      // the tap that OPENED the panel lands on this backdrop as a synthetic
+      // click when the finger lifts — that click belongs to the opening
+      // gesture, not to a "close" intent, so ignore it (350 ms grace)
+      if (e.target === el.furnOverlay && performance.now() - (el.furnOverlay._openedAt || 0) > 350)
+        Game.toggleFurnace();
+    });
     autoStep = localStorage.getItem("vr-autostep") !== "0"; // default ON
     el.optAutostep.checked = autoStep;
     el.optAutostep.addEventListener("change", () => {
@@ -723,8 +778,6 @@
     });
     el.btnGhost.addEventListener("click", () => setGhost(!ghostOn));
 
-    document.querySelectorAll(".slot").forEach((b) =>
-      b.addEventListener("click", () => Game.setPalette(+b.dataset.tile)));
     updateMuteBtn();
 
     // ── kill default browser gestures/haptics everywhere ──
@@ -770,11 +823,29 @@
     // ── tiles & terrain (KEEP IN SYNC with worker.js) ──
     const T = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, ORE: 4, WOOD: 5, BEDROCK: 6,
                 LEAVES: 7, ROCK2: 8, ROCK3: 9, ROCK4: 10, LAVA: 11,
-                COPPER: 12, IRON: 13, DIAMOND: 14 }; // ORE = gold
+                COPPER: 12, IRON: 13, DIAMOND: 14,                    // ORE = gold
+                DOOR: 15, DOOR_OPEN: 16, LADDER: 17, TABLE: 18, CHAIR: 19,
+                FURNACE: 20, SAND: 21, GLASS: 22,
+                COAL: 23, COAL2: 24, COAL3: 25, COAL4: 26,            // fuel ×1/×2/×4/×8
+                RAILING: 27 };
+    const PICKBASE = 100; // inventory ids 100..105 = crafted pickaxes (tools)
     // seconds to mine (before pickaxe speed) — rock gets harder the deeper
     // you go; lava/bedrock are not in the table = unbreakable
     const HARD = { 1: 0.5, 2: 0.7, 3: 1.8, 4: 2.6, 5: 1.1, 7: 0.3, 8: 3.2, 9: 5.5, 10: 9,
-                   12: 2.0, 13: 3.4, 14: 5.0 };
+                   12: 2.0, 13: 3.4, 14: 5.0, 15: 1.4, 16: 1.4, 17: 0.6, 18: 1.2,
+                   19: 0.9, 20: 3.0, 21: 0.5, 22: 0.9, 23: 1.8, 24: 3.0, 25: 5.0,
+                   26: 8.0, 27: 0.8 };
+    // blocks you can build with (everything diggable except grass/lava/bedrock)
+    const PLACEABLE = new Set([2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14,
+                               15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
+    // tapping these triggers their action instead of digging (with hand or
+    // a block held — a HELD PICKAXE still digs them)
+    const INTERACT = new Set([T.DOOR, T.DOOR_OPEN, T.CHAIR, T.FURNACE]);
+    // walk-through front tiles: air, open doors, ladders; tables & chairs
+    // are one-way platforms (solid from above only)
+    const PASSTHRU = new Set([T.AIR, T.DOOR_OPEN, T.LADDER, T.TABLE, T.CHAIR]);
+    const PLATFORM_TOP = { [T.TABLE]: 0, [T.CHAIR]: 0.3 }; // surface offset inside the block
+    const FUEL = { [T.COAL]: 1, [T.COAL2]: 2, [T.COAL3]: 4, [T.COAL4]: 8 };
     const PW = 0.8, PH = 1.8;   // player box (m)
     const CH = 32;              // chunk size (tiles)
 
@@ -850,6 +921,9 @@
       }
       return T.AIR;
     }
+    // sandy patches: whole columns of ground turn to sand — broad noise
+    // blobs so beaches read as places, not speckles (KEEP IN SYNC worker)
+    function sandCol(x) { return fbm1(x / 260, seed + 61, 2) > 0.62; }
     function tileAt(x, y) {
       x |= 0; y |= 0;
       if (y < 0) return T.AIR;
@@ -859,17 +933,20 @@
       if (y < h) return crownAt(x, y);             // sky band: crowns up front
       const d = y - h;
       if (d > 6 && fbm2(x / 22, y / 22, seed + 31, 2) > 0.62) return T.AIR; // caves
-      if (d === 0) return T.GRASS;
-      if (d < 5) return T.DIRT;
+      const sand = sandCol(x);
+      if (d === 0) return sand ? T.SAND : T.GRASS;
+      if (d < 5) return sand ? T.SAND : T.DIRT;
       // rock grows harder & darker with depth — perlin-wobbled boundaries —
       // and each rock layer carries its own ore: copper in stone, iron in
-      // slate, gold in dark rock, diamond in void rock
+      // slate, gold in dark rock, diamond in void rock. COAL rides along,
+      // one better grade per layer (plain → ×2 → ×4 → ×8 burn time).
       const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
       const or = hash2(x, y, seed ^ 0x9e37);
-      if (dd > 900) return or < 0.020 ? T.DIAMOND : T.ROCK4;
-      if (dd > 480) return or < 0.025 ? T.ORE : T.ROCK3;
-      if (dd > 190) return or < 0.025 ? T.IRON : T.ROCK2;
-      return or < 0.025 ? T.COPPER : T.STONE;
+      const cr = hash2(x, y, seed ^ 0x5bd1);
+      if (dd > 900) return or < 0.020 ? T.DIAMOND : cr < 0.030 ? T.COAL4 : T.ROCK4;
+      if (dd > 480) return or < 0.025 ? T.ORE : cr < 0.030 ? T.COAL3 : T.ROCK3;
+      if (dd > 190) return or < 0.025 ? T.IRON : cr < 0.030 ? T.COAL2 : T.ROCK2;
+      return or < 0.025 ? T.COPPER : cr < 0.030 ? T.COAL : T.STONE;
     }
 
     // ── natural BACK layer (KEEP IN SYNC with worker.js) ──
@@ -885,7 +962,7 @@
       const h = heightAt(x);
       if (y < h) return trunkAt(x, y);           // sky band: just trunks
       const d = y - h;
-      if (d < 5) return T.DIRT;                  // dirt wall behind grass too
+      if (d < 5) return sandCol(x) ? T.SAND : T.DIRT; // dirt wall behind grass too
       // walls are plain strata — no ore in the back layer
       const dd = d + (fbm2(x / 55, y / 55, seed + 43, 2) - 0.5) * 36;
       if (dd > 900) return T.ROCK4;
@@ -898,11 +975,15 @@
     let active = false, hasWorld = false;
     let ws = null, wsUrl = "", myId = "", myName = "", curRoom = "";
     let reconnectTimer = 0;
-    const me = { x: 0, y: 0, vy: 0, grounded: false };
+    const me = { x: 0, y: 0, vy: 0, grounded: false,
+                 crouch: false, seated: null, onPlatform: false, dropT: 0 };
     const remotes = new Map(); // id -> { id, name, x, y, tx, ty }
     const input = { left: false, right: false, jump: false, down: false };
     const joyVec = { x: 0, y: 0 };  // ghost-mode joystick, -1..1 each axis
+    const fj = { x: 0, up: false, down: false }; // flat joystick: -1..1 walk, snaps
     const SPD = 6.5, G = 34, JUMP = 12.2; // m/s, m/s², m/s — jump ≈ 2.2 m
+    const PHC = 1.0;              // crouched height (standing is PH = 1.8)
+    const phCur = () => (me.crouch ? PHC : PH);
     let lastTs = 0, acc = 0, raf = 0;
     let lastSend = 0, lastSentX = -1, lastSentY = -1;
     let lastHb = 0; // heartbeat: proves we're alive even when standing still
@@ -927,14 +1008,15 @@
       pxm = next;
     }
 
-    // tools: mouse uses LMB dig / RMB place; touch taps a block to dig it
-    // or taps air to build there — the palette picks which block gets built.
-    // The LAYER toggle (Q / ⧉ button) picks where dig & build happen:
-    // the solid FRONT, or the walk-through BACK (placed there, any block
-    // renders darker and you can walk straight past it).
-    // INVENTORY: you start with NOTHING — blocks come from digging them
-    // (grass gives dirt). Slot badges show how many you hold.
-    let palette = T.DIRT;
+    // tools: mouse uses LMB use / RMB place; touch taps a block to dig it
+    // or taps air to build there — the RIBBON selection picks what happens:
+    // a block places, a pickaxe digs faster, the bare hand digs slowly.
+    // The LAYER toggle (Q / Front·Back button) picks where dig & build
+    // happen — ABSOLUTELY, no autoswitch: the solid FRONT, or the
+    // walk-through BACK (any block placed there renders darker and you
+    // can walk straight past it). You start with NOTHING — blocks come
+    // from digging them (grass gives dirt).
+    let sel = 0;                 // 0 = hand (nothing selected)
     let layer = 0;               // 0 = front, 1 = back — ABSOLUTE, no autoswitch
     function setLayer(l) {
       layer = l ? 1 : 0;
@@ -943,29 +1025,47 @@
       el.btnLayer.classList.toggle("on", layer === 1);
     }
     function toggleLayer() { setLayer(layer === 1 ? 0 : 1); }
-    const inv = new Map();       // tile -> count held
+    const inv = new Map();       // item id -> count (ids: tile ids, 100+ = picks)
     const DROP = { 1: T.DIRT };  // grass drops dirt; everything else drops itself
-    function invAdd(v, n) { inv.set(v, (inv.get(v) || 0) + n); refreshSlots(); renderCraft(); }
-    function refreshSlots() {
-      let any = false;
-      document.querySelectorAll(".slot").forEach((b) => {
-        const n = inv.get(+b.dataset.tile) || 0;
-        b.querySelector(".n").textContent = n;
-        b.classList.toggle("hidden", n === 0); // only what you've acquired
-        if (n > 0) any = true;
-      });
-      $("slots").classList.toggle("hidden", !any); // no empty bar
+    const isTool = (id) => id >= PICKBASE;
+    const isBlock = (id) => id > 0 && id < PICKBASE && PLACEABLE.has(id);
+    function invAdd(v, n) {
+      const nv = (inv.get(v) || 0) + n;
+      if (nv <= 0) { inv.delete(v); if (sel === v) sel = 0; }
+      else inv.set(v, nv);
+      renderRibbon(); renderCraft(); renderFurnace();
     }
-    function setPalette(v) {
-      palette = v;
-      document.querySelectorAll(".slot").forEach((b) =>
-        b.classList.toggle("sel", +b.dataset.tile === v));
+    function setSel(v) { sel = sel === v ? 0 : v; renderRibbon(); }
+    const invOrder = () => [...inv.keys()].reverse(); // filled right → left
+    function renderRibbon() {
+      const order = invOrder().slice(0, 10);
+      if (sel && !order.includes(sel)) sel = 0;
+      el.ribbon.innerHTML = "";
+      for (const id of order) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ritem" + (sel === id ? " sel" : "");
+        b.title = isTool(id) ? PICKS[id - PICKBASE].name : (TNAME[id] || "block");
+        const sw = document.createElement("span");
+        sw.className = "sw";
+        if (isTool(id)) { sw.classList.add("pick"); sw.textContent = "⛏"; }
+        else sw.style.background = SLOTCOL[id] || "#888";
+        b.appendChild(sw);
+        if (!isTool(id)) {
+          const n = document.createElement("span");
+          n.className = "n";
+          n.textContent = inv.get(id);
+          b.appendChild(n);
+        }
+        b.addEventListener("click", () => setSel(id));
+        el.ribbon.appendChild(b);
+      }
     }
 
     // ── crafting book: pickaxe tiers ──
     // Each tier digs faster; recipes are paid from the block inventory.
-    // Crafted picks persist on this device (localStorage), best one is
-    // always equipped. Costs climb with the ore's home rock layer.
+    // Crafted picks persist on this device (localStorage) and live in the
+    // ribbon — SELECT one to swing it. Costs climb with the ore's layer.
     const PICKS = [
       { name: "Wooden Pickaxe",  speed: 1.5, cost: { 5: 4 } },
       { name: "Stone Pickaxe",   speed: 2.0, cost: { 5: 2, 3: 4 } },
@@ -976,13 +1076,23 @@
     ];
     const SLOTCOL = { 2: "#6b4a30", 3: "#57617e", 4: "#a88428", 5: "#8a6238", 7: "#3f7a34",
                       8: "#3d4459", 9: "#272b3b", 10: "#15171f", 12: "#b87333",
-                      13: "#b6aea2", 14: "#4ec3d8" };
+                      13: "#b6aea2", 14: "#4ec3d8", 15: "#7a5836", 17: "#9a7448",
+                      18: "#a87e50", 19: "#9a7448", 20: "#6a6a72", 21: "#d8c08c",
+                      22: "#bfe2f0", 23: "#2c2c34", 24: "#34343e", 25: "#3e3e4a",
+                      26: "#4a4a56", 27: "#8a6a42" };
     const TNAME = { 2: "dirt", 3: "stone", 4: "gold", 5: "wood", 7: "leaves", 8: "slate",
-                    9: "dark rock", 10: "void rock", 12: "copper", 13: "iron", 14: "diamond" };
+                    9: "dark rock", 10: "void rock", 12: "copper", 13: "iron", 14: "diamond",
+                    15: "door", 17: "ladder", 18: "table", 19: "chair", 20: "furnace",
+                    21: "sand", 22: "glass", 23: "lignite", 24: "coal", 25: "bituminous",
+                    26: "anthracite", 27: "railing" };
     let picksCrafted;
     try { picksCrafted = new Set(JSON.parse(localStorage.getItem("vr-picks") || "[]")); }
     catch (_) { picksCrafted = new Set(); }
+    // digging speed comes from the SELECTED pickaxe — bare hand is ×1
     function pickSpeed() {
+      return isTool(sel) && PICKS[sel - PICKBASE] ? PICKS[sel - PICKBASE].speed : 1;
+    }
+    function bestPickSpeed() {
       let s = 1;
       for (const i of picksCrafted) if (PICKS[i]) s = Math.max(s, PICKS[i].speed);
       return s;
@@ -995,12 +1105,14 @@
       for (const [t, n] of Object.entries(p.cost)) invAdd(+t, -n);
       picksCrafted.add(i);
       try { localStorage.setItem("vr-picks", JSON.stringify([...picksCrafted])); } catch (_) {}
-      setStatus(el.roomStatus, "Crafted " + p.name + " — digging ×" + p.speed + " now!", "ok");
+      invAdd(PICKBASE + i, 1); // the pickaxe itself becomes a ribbon item
+      setStatus(el.roomStatus, "Crafted " + p.name + " — select it to dig ×" + p.speed + "!", "ok");
       renderCraft();
     }
     function renderCraft() {
       if (el.craftOverlay.classList.contains("hidden")) return;
-      el.craftCur.textContent = "Your pickaxe: ×" + pickSpeed() + " digging speed";
+      el.craftCur.textContent = "Your best pickaxe: ×" + bestPickSpeed() +
+        " digging speed (select it in the ribbon)";
       el.craftList.innerHTML = "";
       PICKS.forEach((p, i) => {
         const owned = picksCrafted.has(i);
@@ -1038,7 +1150,62 @@
     function toggleCraft() {
       const open = el.craftOverlay.classList.contains("hidden");
       el.craftOverlay.classList.toggle("hidden", !open);
-      if (open) { el.menuOverlay.classList.add("hidden"); renderCraft(); }
+      if (open) { el.menuOverlay.classList.add("hidden"); el.furnOverlay.classList.add("hidden"); renderCraft(); }
+    }
+
+    // ── furnace (tap a placed furnace block): burn coal, melt sand → glass ──
+    // One piece of coal smelts FUEL[tier] units: lignite 1, coal 2,
+    // bituminous 4, anthracite 8 — the deeper the layer, the better the coal.
+    function toggleFurnace() {
+      const open = el.furnOverlay.classList.contains("hidden");
+      el.furnOverlay.classList.toggle("hidden", !open);
+      if (open) {
+        el.menuOverlay.classList.add("hidden"); el.craftOverlay.classList.add("hidden");
+        el.furnOverlay._openedAt = performance.now(); // backdrop-click grace
+        renderFurnace();
+      }
+    }
+    function smelt() {
+      let fuel = 0;
+      for (const t of [T.COAL, T.COAL2, T.COAL3, T.COAL4])
+        if ((inv.get(t) || 0) > 0) { fuel = t; break; }
+      if (!fuel) { setStatus(el.roomStatus, "No coal — dig some from the rock layers", "err"); return; }
+      const n = Math.min(FUEL[fuel], inv.get(T.SAND) || 0);
+      if (n <= 0) { setStatus(el.roomStatus, "No sand to melt", "err"); return; }
+      invAdd(fuel, -1);
+      invAdd(T.SAND, -n);
+      invAdd(T.GLASS, n);
+      setStatus(el.roomStatus, "Smelted " + n + " sand → " + n + " glass (" +
+        TNAME[fuel] + " ×" + FUEL[fuel] + ")", "ok");
+    }
+    function renderFurnace() {
+      if (el.furnOverlay.classList.contains("hidden")) return;
+      el.furnBody.innerHTML = "";
+      const mk = (txt, col) => {
+        const row = document.createElement("div");
+        row.className = "craft-cost";
+        row.style.marginBottom = "6px";
+        const chip = document.createElement("span");
+        chip.className = "craft-chip";
+        chip.innerHTML = '<span class="sw"></span><span class="ct"></span>';
+        chip.querySelector(".sw").style.background = col;
+        chip.querySelector(".ct").textContent = txt;
+        row.appendChild(chip);
+        el.furnBody.appendChild(row);
+      };
+      for (const t of [T.COAL, T.COAL2, T.COAL3, T.COAL4])
+        mk(TNAME[t] + " — burns ×" + FUEL[t] + " · you have " + (inv.get(t) || 0), SLOTCOL[t]);
+      mk("sand — you have " + (inv.get(T.SAND) || 0), SLOTCOL[T.SAND]);
+      mk("glass — you have " + (inv.get(T.GLASS) || 0), SLOTCOL[T.GLASS]);
+      const btn = document.createElement("button");
+      btn.className = "btn-primary craft-btn";
+      btn.style.marginTop = "8px";
+      btn.textContent = "Smelt sand → glass";
+      const can = [T.COAL, T.COAL2, T.COAL3, T.COAL4].some((t) => (inv.get(t) || 0) > 0) &&
+                  (inv.get(T.SAND) || 0) > 0;
+      btn.disabled = !can;
+      btn.addEventListener("click", smelt);
+      el.furnBody.appendChild(btn);
     }
 
     // ── overlay + chunk caches ──
@@ -1058,8 +1225,9 @@
       const v = overlayB.get((x | 0) + "," + (y | 0));
       return v === undefined ? backAt(x, y) : v;
     }
-    // only the FRONT layer collides — back walls are walk-through
-    const solid = (tx, ty) => getTile(tx, ty) !== T.AIR;
+    // only the FRONT layer collides — back walls are walk-through, and so
+    // are open doors, ladders, tables & chairs (those get their own physics)
+    const solid = (tx, ty) => !PASSTHRU.has(getTile(tx, ty));
 
     function getChunkData(cx, cy) {
       const k = cx + "," + cy;
@@ -1107,6 +1275,15 @@
       lava: [[242, 110, 24], [255, 140, 30], [226, 86, 16]],
       lavaHi: [255, 214, 92], lavaCrust: [122, 44, 12],
       bed: [[86, 86, 86], [46, 46, 46], [61, 61, 61], [107, 107, 107]],
+      sand: [[214, 193, 141], [224, 205, 153], [203, 182, 130], [234, 215, 163]],
+      sandDark: [176, 156, 108], sandPeb: [190, 170, 120],
+      coal: [[40, 40, 46], [54, 54, 62], [28, 28, 33]],
+      coalHi: [150, 158, 172],                    // anthracite glint
+      glassEdge: [206, 232, 246], glassShine: [232, 246, 252],
+      plank: [[150, 112, 66], [160, 122, 76], [140, 102, 58]],
+      plankDark: [104, 76, 44], plankHi: [182, 142, 92],
+      furnBody: [[104, 102, 108], [96, 94, 100], [114, 112, 118]],
+      furnDark: [54, 52, 58], furnGlow: [255, 150, 40],
     };
     const pick = (arr, r) => arr[Math.min(arr.length - 1, (r * arr.length) | 0)];
     const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t | 0,
@@ -1121,22 +1298,80 @@
         const i = (y * S + x) * 4;
         d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
       };
+      const setA = (x, y, c, a) => { // semi-transparent pixel (glass)
+        const i = (y * S + x) * 4;
+        d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = a;
+      };
       const R = (x, y, s) => hash2(x + vi * 97, y + vi * 57, s);
+      // thin / see-through blocks leave most pixels transparent
+      const SEE_THROUGH = v === T.LADDER || v === T.TABLE || v === T.CHAIR ||
+                          v === T.DOOR_OPEN || v === T.GLASS || v === T.RAILING;
       for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
         const r = R(x, y, 11), r2 = R(x, y, 23);
         let c;
-        if (v === T.GRASS) {
+        if (v === T.GLASS) { // clear pane: bright rim + a diagonal shine
+          const edge = x === 0 || y === 0 || x === S - 1 || y === S - 1;
+          const shine = ((x - y + 2 * S) % 11) < 2 && x > 1 && y > 1 && x < S - 2;
+          if (edge) setA(x, y, MCP.glassEdge, 200);
+          else if (shine) setA(x, y, MCP.glassShine, 56);
+          else setA(x, y, MCP.glassShine, 18);
+          continue;
+        } else if (v === T.LADDER) {
+          const rail = x === 3 || x === 4 || x === 11 || x === 12;
+          const rung = (y % 5) < 2 && x >= 3 && x <= 12;
+          if (rail || rung) set(x, y, r2 < 0.3 ? MCP.plankDark : MCP.plank[1]);
+          continue;
+        } else if (v === T.TABLE) { // letter T: full-width top + center leg
+          const top = y < 4, leg = x >= 6 && x <= 9 && y >= 4;
+          if (top || leg)
+            set(x, y, y === 0 ? MCP.plankHi : r2 < 0.3 ? MCP.plankDark : pick(MCP.plank, r));
+          continue;
+        } else if (v === T.CHAIR) { // seat at 70% height + back on the left
+          const seat = y >= 4 && y < 7;
+          const back = x < 2 && y < 4;
+          const legs = y >= 7 && (x === 2 || x === 3 || x === 12 || x === 13);
+          if (seat || back || legs)
+            set(x, y, y === 4 ? MCP.plankHi : r2 < 0.3 ? MCP.plankDark : pick(MCP.plank, r));
+          continue;
+        } else if (v === T.RAILING) { // two horizontal bars + edge posts
+          const bar = (y >= 2 && y < 5) || (y >= 9 && y < 12);
+          const post = x < 2;
+          if (bar || post) set(x, y, r2 < 0.3 ? MCP.plankDark : pick(MCP.plank, r));
+          continue;
+        } else if (v === T.DOOR_OPEN) { // swung open: just the frame remains
+          const frame = x < 2 || y < 2 || x >= S - 2;
+          if (frame) set(x, y, r2 < 0.3 ? MCP.plankDark : pick(MCP.plank, r));
+          continue;
+        } else if (v === T.DOOR) { // closed wooden door: planks + frame + knob
+          const frame = x < 2 || y < 2 || x >= S - 2 || y >= S - 1;
+          const knob = x >= 11 && x <= 12 && y >= 8 && y <= 9;
+          const seam = x === 5 || x === 10; // plank seams
+          c = knob ? [212, 178, 84] : frame || seam ? MCP.plankDark : pick(MCP.plank, r);
+        } else if (v === T.SAND) {
+          c = r2 < 0.10 ? MCP.sandDark : r2 < 0.18 ? MCP.sandPeb : pick(MCP.sand, r);
+        } else if (v === T.FURNACE) {
+          // stone oven: dark mouth with a live coal glow inside
+          const mouth = x >= 4 && x <= 11 && y >= 6 && y <= 12;
+          const rim = x < 1 || y < 1 || x >= S - 1 || y >= S - 1;
+          if (mouth) {
+            const hot = 1 - Math.hypot(x - 7.5, y - 9) / 5;
+            c = hot > 0.35 && R(x, y, 67) > 0.3
+              ? mixc(MCP.furnDark, MCP.furnGlow, clamp(hot, 0, 1)) : MCP.furnDark;
+          } else c = rim || r2 < 0.09 ? MCP.furnDark : pick(MCP.furnBody, r);
+        } else if (v === T.GRASS) {
           const gh = 4 + (R(x, 0, 31) < 0.45 ? 1 : 0);      // ragged grass edge
           if (y < gh) c = (y === 0 && r2 < 0.4) ? MCP.grassHi
             : (r2 < 0.12 ? MCP.grass[3] : pick(MCP.grass, r));
           else c = r2 < 0.08 ? MCP.dirtDark : r2 < 0.14 ? MCP.pebble : pick(MCP.dirt, r);
         } else if (v === T.DIRT) {
           c = r2 < 0.08 ? MCP.dirtDark : r2 < 0.14 ? MCP.pebble : pick(MCP.dirt, r);
-        } else if (v === T.STONE || v === T.ORE || v === T.COPPER || v === T.IRON || v === T.DIAMOND) {
-          // ore blocks wear their home layer's rock as the base
-          const base = v === T.IRON ? [MCP.rock2, MCP.rock2Dark]
-            : v === T.ORE ? [MCP.rock3, MCP.rock3Dark]      // gold → dark rock
-            : v === T.DIAMOND ? [MCP.rock4, MCP.rock4Dark]  // diamond → void rock
+        } else if (v === T.STONE || v === T.ORE || v === T.COPPER || v === T.IRON || v === T.DIAMOND ||
+                   v === T.COAL || v === T.COAL2 || v === T.COAL3 || v === T.COAL4) {
+          // ore blocks wear their home layer's rock as the base — coal too,
+          // one grade better per depth (anthracite hides in void rock)
+          const base = v === T.IRON || v === T.COAL2 ? [MCP.rock2, MCP.rock2Dark]
+            : v === T.ORE || v === T.COAL3 ? [MCP.rock3, MCP.rock3Dark]   // gold → dark rock
+            : v === T.DIAMOND || v === T.COAL4 ? [MCP.rock4, MCP.rock4Dark] // diamond → void rock
             : [MCP.stone, MCP.stoneDark];                   // copper → stone
           c = r2 < 0.07 ? base[1] : pick(base[0], r);
         } else if (v === T.ROCK2 || v === T.ROCK3 || v === T.ROCK4) {
@@ -1172,7 +1407,8 @@
       }
       // ore clusters sprinkled over the base rock (gold/copper/iron/diamond)
       const ORECLUST = v === T.ORE ? MCP.ore : v === T.COPPER ? MCP.copper
-        : v === T.IRON ? MCP.iron : v === T.DIAMOND ? MCP.diamond : null;
+        : v === T.IRON ? MCP.iron : v === T.DIAMOND ? MCP.diamond
+        : v >= T.COAL && v <= T.COAL4 ? MCP.coal : null;
       if (ORECLUST) {
         for (let k = 0; k < 4; k++) {
           const cx = 1 + ((R(k, 1, 61) * 12) | 0), cy = 1 + ((R(k, 2, 71) * 12) | 0);
@@ -1181,9 +1417,15 @@
               set(Math.min(S - 1, cx + dx), Math.min(S - 1, cy + dy), pick(ORECLUST, R(dx, dy, k + 91)));
         }
       }
+      // anthracite: a couple of metallic glints so the best coal reads special
+      if (v === T.COAL4) {
+        for (let k = 0; k < 3; k++)
+          set((R(k, 5, 95) * S) | 0, (R(k, 6, 96) * S) | 0, MCP.coalHi);
+      }
       // soft bevel so neighbours read as separate blocks (no drawn grid) —
-      // EXCEPT wood & leaves, which must flow seamlessly (trunks, canopies)
-      if (v !== T.WOOD && v !== T.LEAVES) {
+      // EXCEPT wood & leaves, which must flow seamlessly (trunks, canopies),
+      // and the see-through blocks, whose transparency must stay clean
+      if (v !== T.WOOD && v !== T.LEAVES && !SEE_THROUGH) {
         for (let i = 0; i < S; i++) {
           for (const [x, y, f] of [[i, 0, 1.10], [i, S - 1, 0.88], [0, i, 1.05], [S - 1, i, 0.94]]) {
             const j = (y * S + x) * 4;
@@ -1200,14 +1442,23 @@
       let per = texCache[v];
       if (per) return per;
       per = [];
-      for (let vi = 0; vi < (v === T.WOOD ? 1 : 4); vi++) { // wood: ONE shared bark
+      // wood & the hand-built blocks use ONE shared variant, so they tile
+      // seamlessly instead of showing 4 repeating patterns
+      const ONE = v === T.WOOD || v === T.DOOR || v === T.DOOR_OPEN ||
+                  v === T.LADDER || v === T.TABLE || v === T.CHAIR ||
+                  v === T.RAILING || v === T.GLASS;
+      for (let vi = 0; vi < (ONE ? 1 : 4); vi++) { // wood: ONE shared bark
         const img = bakeTexVariant(v, vi);
         // average color of the 16×16 texture → the overview map's pixel.
         // Summed during the one-time bake, so it costs nothing per frame.
-        let ar = 0, ag = 0, ab = 0;
+        // Only OPAQUE pixels count, or see-through blocks would read black.
+        let ar = 0, ag = 0, ab = 0, an = 0;
         const dd = img.data;
-        for (let i = 0; i < dd.length; i += 4) { ar += dd[i]; ag += dd[i + 1]; ab += dd[i + 2]; }
-        const n = dd.length / 4;
+        for (let i = 0; i < dd.length; i += 4) {
+          if (dd[i + 3] < 120) continue;
+          ar += dd[i]; ag += dd[i + 1]; ab += dd[i + 2]; an++;
+        }
+        if (!an) { an = 1; }
         const c16 = document.createElement("canvas");
         c16.width = c16.height = 16;
         c16.getContext("2d").putImageData(img, 0, 0);
@@ -1220,7 +1471,7 @@
           g.drawImage(c16, 0, 0, s, s);
           res.push(c);
         }
-        per.push({ res, avg: [ar / n, ag / n, ab / n] });
+        per.push({ res, avg: [ar / an, ag / an, ab / an] });
       }
       texCache[v] = per;
       return per;
@@ -1289,16 +1540,9 @@
                               (clamp(db, 0, 1) * 255 | 0) + ")";
         g2.fillRect(px, py, res, res);
         g2.globalCompositeOperation = "source-over";
-      } else if (v === T.AIR && wy >= heightAt(wx)) {
-        // no wall at all (a placed back block was dug out): the old dark
-        // void, still lit by lava from below
-        const gl = lavaGlowAt(wx, wy);
-        const j = hash2(wx, wy, 17);
-        g2.fillStyle = gl > 0
-          ? "hsl(18 82% " + (9 + gl * 42 + j * 9) + "%)"
-          : "hsl(228 26% " + (9 + j * 4) + "%)";
-        g2.fillRect(px, py, res, res);
       }
+      // no wall at all (back dug away) → the cell stays TRANSPARENT and the
+      // same starry sky shows through, even deep underground
       if (v === T.AIR) return;
       g2.drawImage(tileTexFor(v, wx, wy, res), px, py);
       const tn = worldTint(wx, wy); // global perlin colour drift
@@ -1418,18 +1662,7 @@
                 continue;
               }
               if (y < hh) continue;        // open sky → transparent
-              const i = (y * w + ox) * 4;  // no wall: dark void, lava-lit
-              const gl = lavaGlowAt(x, y);
-              const j = (hash2(x, y, 53) - 0.5) * 6;
-              if (gl > 0) { // dark blue → hot orange, stronger nearer the lava
-                d[i]     = 16 + j + (239 - j) * gl;
-                d[i + 1] = 20 + j + (104 - j) * gl;
-                d[i + 2] = 32 + j + (2 - j) * gl;
-              } else {
-                d[i] = 16 + j; d[i + 1] = 20 + j; d[i + 2] = 32 + j;
-              }
-              d[i + 3] = 255;
-              continue;
+              continue;                    // no wall left: sky shines through
             }
             // pixel = the block's own average texture color × world tint
             const i = (y * w + ox) * 4;
@@ -1469,11 +1702,8 @@
           t.ctx.fillRect(wx - t.x0, wy, 1, 1);
         } else if (wy < heightAt(wx)) {
           t.ctx.clearRect(wx - t.x0, wy, 1, 1);
-        } else {
-          const gl = lavaGlowAt(wx, wy);
-          const r = 16 + 239 * gl, g = 20 + 104 * gl, b = 32 + 2 * gl;
-          t.ctx.fillStyle = "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")";
-          t.ctx.fillRect(wx - t.x0, wy, 1, 1);
+        } else { // both layers gone → transparent: the sky shows through
+          t.ctx.clearRect(wx - t.x0, wy, 1, 1);
         }
       } else {
         const c = blockAvgColor(v, wx, wy), tn = worldTint(wx, wy);
@@ -1505,7 +1735,11 @@
       overlay.clear(); overlayB.clear();
       chunkData.clear(); chunkTex.clear(); lru.length = 0; lruBytes = 0;
       hcache.clear(); lavaGlowTop.clear(); ovTiles = []; ovBuiltCol = 0; ovPendingZoom = 0;
-      pxm = 48; inv.clear(); refreshSlots(); setPalette(T.DIRT); setLayer(0);
+      pxm = 48; setLayer(0);
+      inv.clear(); sel = 0;
+      for (const i of picksCrafted) inv.set(PICKBASE + i, 1); // crafted picks persist
+      renderRibbon();
+      me.crouch = false; me.seated = null; me.onPlatform = false; me.dropT = 0;
       mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0;
       wireInput();
       connectWs();
@@ -1586,14 +1820,32 @@
 
     // auto-step (Menu toggle): walking into a 1-block step while grounded
     // hops up it (~1.3 m) — but only if every row above the step is clear,
-    // so a real wall (2+ blocks) still stops you
+    // so a real wall (2+ blocks) still stops you. RAILINGS never hop,
+    // and a crouched player stays low and bumps instead.
     function tryAutoStep(tx) {
-      if (!autoStep || !me.grounded) return;
-      const botRow = Math.floor(me.y + PH - 1e-6);
-      if (!solid(tx, botRow)) return;                 // step must be at foot level
+      if (!autoStep || !me.grounded || me.crouch) return;
+      const botRow = Math.floor(me.y + phCur() - 1e-6);
+      if (!solid(tx, botRow) || getTile(tx, botRow) === T.RAILING) return;
       for (let r = Math.floor(me.y) - 1; r < botRow; r++)
         if (solid(tx, r)) return;                     // taller than 1 → wall, no hop
       me.vy = -9.4; me.grounded = false;              // ~1.3 m hop
+    }
+
+    // ladder contact: the player's box overlaps a ladder tile on EITHER
+    // layer (back-layer ladders climb just the same)
+    function onLadder() {
+      const ph = phCur();
+      for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + ph - 1e-6); ty++)
+        for (let tx = Math.floor(me.x); tx <= Math.floor(me.x + PW - 1e-6); tx++)
+          if (getTile(tx, ty) === T.LADDER || getBack(tx, ty) === T.LADDER) return true;
+      return false;
+    }
+    // one-way platforms (table / chair): their walk-on surface sits at
+    // ty + PLATFORM_TOP — land only when FALLING onto it from above
+    function platformAt(tx, ty) {
+      const v = getTile(tx, ty);
+      const top = PLATFORM_TOP[v];
+      return top === undefined ? null : ty + top;
     }
 
     // ── physics (own block only): AABB vs tile grid ──
@@ -1610,11 +1862,42 @@
         me.vy = 0; me.grounded = false; // airborne pose while flying
         return;
       }
+      // ── sitting on a chair: frozen until you move / jump / tap again ──
+      if (me.seated) {
+        const ch = me.seated;
+        if (getTile(ch.x, ch.y) !== T.CHAIR) me.seated = null; // chair dug away
+        else if (input.left || input.right || input.jump || input.down ||
+                 Math.abs(fj.x) > 0.05 || fj.up || fj.down) me.seated = null;
+        else {
+          me.x = ch.x + (1 - PW) / 2;
+          me.y = ch.y + 0.3 - phCur();
+          me.vy = 0; me.grounded = true;
+          return;
+        }
+      }
+      // ── crouch: S / joystick snap-down — 1 m tall, feet stay planted ──
+      const wantDown = input.down || fj.down;
+      if (wantDown && !me.crouch && me.onPlatform) {
+        // crouching ON a table/chair = drop through to walk-past mode
+        me.dropT = 0.3; me.onPlatform = false; me.grounded = false;
+      } else if (wantDown && !me.crouch) {
+        me.crouch = true;
+        me.y += PH - PHC; // feet stay planted — the head comes down
+      } else if (!wantDown && me.crouch) {
+        // stand back up — only if there's headroom above
+        let free = true;
+        for (let ty = Math.floor(me.y - (PH - PHC)); ty < Math.floor(me.y); ty++)
+          for (let tx = Math.floor(me.x); tx <= Math.floor(me.x + PW - 1e-6); tx++)
+            if (solid(tx, ty)) free = false;
+        if (free) { me.y -= PH - PHC; me.crouch = false; }
+      }
+      if (me.dropT > 0) me.dropT -= dt;
+      const ph = phCur();
       // embedded in solid? (e.g. ghost mode just switched off inside rock)
       // → surface row by row to the nearest open air
       const bx0 = Math.floor(me.x), bx1 = Math.floor(me.x + PW - 1e-6);
       const stuck = () => {
-        for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + PH - 1e-6); ty++)
+        for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + ph - 1e-6); ty++)
           for (let tx = bx0; tx <= bx1; tx++)
             if (solid(tx, ty)) return true;
         return false;
@@ -1624,31 +1907,57 @@
         while (stuck() && g-- > 0) me.y -= 1;
         me.vy = 0;
       }
-      const vx = (input.right ? SPD : 0) - (input.left ? SPD : 0);
-      me.vy += G * dt;
+      // analog horizontal speed: keys are digital, the flat joystick is
+      // gradual with NO dead zone — a hair of deflection already creeps
+      const moveX = clamp((input.right ? 1 : 0) - (input.left ? 1 : 0) + fj.x, -1, 1);
+      const vx = moveX * SPD;
+      // ── ladders: no gravity while overlapping one; jump climbs, ──
+      // crouch descends, neither = hang in place
+      const lad = onLadder();
+      const wantJump = input.jump || fj.up;
+      if (lad) {
+        me.grounded = false;
+        me.vy = wantJump ? -4.2 : wantDown ? 4.2 : 0;
+      } else {
+        me.vy += G * dt;
+      }
 
       // horizontal move + wall collision
       me.x += vx * dt;
       if (vx > 0) {
         const tx = Math.floor(me.x + PW);
-        for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + PH - 1e-6); ty++) {
+        for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + ph - 1e-6); ty++) {
           if (solid(tx, ty)) { me.x = tx - PW - 1e-4; tryAutoStep(tx); break; }
         }
       } else if (vx < 0) {
         const tx = Math.floor(me.x);
-        for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + PH - 1e-6); ty++) {
+        for (let ty = Math.floor(me.y); ty <= Math.floor(me.y + ph - 1e-6); ty++) {
           if (solid(tx, ty)) { me.x = tx + 1; tryAutoStep(tx); break; }
         }
       }
       me.x = clamp(me.x, 0, world.w - PW);
 
-      // vertical move + floor/ceiling collision
+      // vertical move + floor/ceiling collision + one-way platforms
+      const feet0 = me.y + ph; // feet BEFORE this move (platform check)
       me.y += me.vy * dt;
       me.grounded = false;
+      me.onPlatform = false;
       if (me.vy > 0) {
-        const ty = Math.floor(me.y + PH);
+        const ty = Math.floor(me.y + ph);
         for (let tx = Math.floor(me.x); tx <= Math.floor(me.x + PW - 1e-6); tx++) {
-          if (solid(tx, ty)) { me.y = ty - PH; me.vy = 0; me.grounded = true; break; }
+          if (solid(tx, ty)) { me.y = ty - ph; me.vy = 0; me.grounded = true; break; }
+        }
+        if (!me.grounded && me.dropT <= 0) { // falling: maybe land on a table/chair
+          let best = Infinity;
+          for (let tx = Math.floor(me.x); tx <= Math.floor(me.x + PW - 1e-6); tx++)
+            for (let yy = Math.floor(feet0); yy <= Math.floor(me.y + ph); yy++) {
+              const surf = platformAt(tx, yy);
+              if (surf !== null && feet0 <= surf + 1e-4 && me.y + ph >= surf && surf < best)
+                best = surf;
+            }
+          if (best < Infinity) {
+            me.y = best - ph; me.vy = 0; me.grounded = true; me.onPlatform = true;
+          }
         }
       } else if (me.vy < 0) {
         const ty = Math.floor(me.y);
@@ -1656,7 +1965,7 @@
           if (solid(tx, ty)) { me.y = ty + 1; me.vy = 0; break; }
         }
       }
-      if (me.y > world.h - PH) { me.y = world.h - PH; me.vy = 0; me.grounded = true; }
+      if (me.y > world.h - ph) { me.y = world.h - ph; me.vy = 0; me.grounded = true; }
 
       // ease remote blocks toward their latest reported position
       const k = Math.min(1, dt * 14);
@@ -1736,26 +2045,63 @@
       return v !== T.AIR && v !== T.BEDROCK && v !== T.LAVA;
     }
     function tryPlace(tx, ty) {
-      if ((inv.get(palette) || 0) <= 0) return; // you can only place what you dug
+      if (!isBlock(sel)) return;              // only a selected BLOCK places
+      if ((inv.get(sel) || 0) <= 0) return;   // you can only place what you dug
       if (!inReach(tx, ty)) return;
       if (layer === 1) {
         // back wall: goes into any empty back cell, is walk-through, so
         // there is no "don't entomb a player" check here
         if (getBack(tx, ty) !== T.AIR) return;
-        setTileLocal(tx, ty, palette, 1); // optimistic; server confirms
-        invAdd(palette, -1);
+        setTileLocal(tx, ty, sel, 1); // optimistic; server confirms
+        invAdd(sel, -1);
         if (ws && ws.readyState === 1)
-          ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: palette, l: 1 }));
+          ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: sel, l: 1 }));
         return;
       }
       if (getTile(tx, ty) !== T.AIR) return;
       const hit = (p) => tx < p.x + PW && tx + 1 > p.x && ty < p.y + PH && ty + 1 > p.y;
       if (hit(me)) return;
       for (const r of remotes.values()) if (hit(r)) return;
-      setTileLocal(tx, ty, palette, 0); // optimistic; server confirms
-      invAdd(palette, -1);
+      setTileLocal(tx, ty, sel, 0); // optimistic; server confirms
+      invAdd(sel, -1);
       if (ws && ws.readyState === 1)
-        ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: palette, l: 0 }));
+        ws.send(JSON.stringify({ t: "place", x: tx, y: ty, v: sel, l: 0 }));
+    }
+
+    // ── interactive blocks (tap = use, never dig) ──
+    const doorish = (v) => v === T.DOOR || v === T.DOOR_OPEN;
+    // doors touching side-to-side or up-and-down act as ONE door: tapping
+    // any block of it swings the whole thing. Flood-filled 4-neighbour
+    // region, applied optimistically — the server re-does it authoritatively
+    // and broadcasts every flipped cell to the room.
+    function useDoor(tx, ty) {
+      const get = layer === 1 ? getBack : getTile;
+      const start = get(tx, ty);
+      if (!doorish(start)) return;
+      const target = start === T.DOOR ? T.DOOR_OPEN : T.DOOR;
+      const seen = new Set([tx + "," + ty]);
+      const queue = [[tx, ty]];
+      const cells = [];
+      while (queue.length && cells.length < 512) {
+        const [cx, cy] = queue.pop();
+        cells.push([cx, cy]);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = cx + dx, ny = cy + dy, k = nx + "," + ny;
+          if (seen.has(k) || !doorish(get(nx, ny))) continue;
+          seen.add(k); queue.push([nx, ny]);
+        }
+      }
+      for (const [cx, cy] of cells) setTileLocal(cx, cy, target, layer);
+      if (ws && ws.readyState === 1)
+        ws.send(JSON.stringify({ t: "door", x: tx, y: ty, l: layer }));
+    }
+    function interact(tx, ty, v) {
+      if (doorish(v)) useDoor(tx, ty);
+      else if (v === T.CHAIR) {
+        if (me.seated) me.seated = null;             // tap again = stand up
+        else { me.seated = { x: tx, y: ty }; me.crouch = false; }
+      }
+      else if (v === T.FURNACE) toggleFurnace();
     }
     function tileFromEvent(e) {
       const wx = camX + e.clientX / pxm, wy = camY + e.clientY / pxm;
@@ -1774,8 +2120,11 @@
       acc += dt;
       // jump trigger lives here, once per FRAME (not per physics step):
       // even with jump HELD, each landing survives to be rendered, so the
-      // arms drop back to normal for a frame between hops
-      if (input.jump && me.grounded) { me.vy = -JUMP; me.grounded = false; }
+      // arms drop back to normal for a frame between hops. On a ladder the
+      // jump input CLIMBS instead (handled in step), so no hop here.
+      if ((input.jump || fj.up) && me.grounded && !onLadder()) {
+        me.vy = -JUMP; me.grounded = false;
+      }
       const h = 1 / 120;
       let n = 0;
       while (acc >= h && n < 8) { step(h); acc -= h; n++; }
@@ -1976,6 +2325,15 @@
       const sleeve = "hsl(" + hue + " 62% 56%)";
       const pants = "hsl(" + hue + " 45% 38%)";
       const x = p.x, y = p.y;
+      // crouched / seated: the whole little person squashes around their
+      // feet to the 1 m crouch height
+      const squash = isMe && (me.crouch || me.seated);
+      if (squash) {
+        ctx.save();
+        ctx.translate(0, y + PH);
+        ctx.scale(1, PHC / PH);
+        ctx.translate(0, -(y + PH));
+      }
 
       // facing + walk cycle follow actual movement — remotes ease toward
       // their reported positions, so this animates them too, no extra data
@@ -2072,6 +2430,28 @@
       // the head — a lifted hand must never disappear behind the face
       if (raisedL) drawArm(x + 0.12, y + 0.62, sleeve, an.armL);
       if (raisedR) drawArm(x + 0.68, y + 0.62, sleeve, an.armR);
+
+      // the selected ribbon item rides in the right hand — a little block
+      // or a pickaxe silhouette, so you can see what you're holding
+      if (isMe && sel) {
+        ctx.save();
+        ctx.translate(x + 0.68, y + 0.62);       // right shoulder pivot
+        ctx.rotate(an.armR || 0);
+        if (isTool(sel)) { // pickaxe: handle + angled head
+          ctx.fillStyle = "#7a5a34";
+          ctx.fillRect(-0.03, 0.42, 0.06, 0.34);
+          ctx.fillStyle = "#9aa2b4";
+          ctx.fillRect(-0.16, 0.38, 0.38, 0.09);
+        } else {           // block swatch with a soft outline
+          ctx.fillStyle = SLOTCOL[sel] || "#888";
+          ctx.fillRect(-0.12, 0.44, 0.28, 0.28);
+          ctx.strokeStyle = "rgba(0,0,0,.35)";
+          ctx.lineWidth = 0.03;
+          ctx.strokeRect(-0.12, 0.44, 0.28, 0.28);
+        }
+        ctx.restore();
+      }
+      if (squash) ctx.restore();
     }
 
     // ── proximity voice: element volume = f(distance), 0 at world.hear ──
@@ -2108,12 +2488,10 @@
         }
         else if (e.key === "q" || e.key === "Q") toggleLayer(); // front ↔ back
         else if (e.key === "c" || e.key === "C") toggleCraft(); // crafting book
-        else if (e.key >= "0" && e.key <= "9") { // slots 1–9, 0 = 10th
+        else if (e.key >= "0" && e.key <= "9") { // ribbon items 1–9, 0 = 10th
           const idx = e.key === "0" ? 9 : +e.key - 1;
-          const vis = [...document.querySelectorAll(".slot")]
-            .filter((b) => !b.classList.contains("hidden"));
-          const b = vis[idx];
-          if (b) setPalette(+b.dataset.tile);
+          const order = invOrder().slice(0, 10);
+          if (order[idx] !== undefined) setSel(order[idx]);
         }
         else if (e.key === "+" || e.key === "=") zoomIn();
         else if (e.key === "-") zoomOut();
@@ -2122,59 +2500,126 @@
         if (MOVE[e.key]) input[MOVE[e.key]] = false;
         else if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") input.jump = false;
       });
-      bindPad(el.btnLeft, "left");
-      bindPad(el.btnRight, "right");
-      bindPad(el.btnJump, "jump");
+      // ── FLAT joystick (normal play): a horizontal groove — drag the knob ──
+      // for gradual walk speed (NO dead zone). Flick it to the very end and
+      // a blue haze glows on that side. Slide ABOVE the groove and the knob
+      // snaps on top: continuous jumping while keeping the horizontal push.
+      // Slide BELOW: crouch (1 m tall — fits through crawl spaces). The free
+      // space above & below the groove is part of the joystick. Once grabbed
+      // it keeps working wherever the finger wanders, until touch-up.
+      let fjPid = -1;
+      const fjMove = (e) => {
+        const gr = el.fjGroove.getBoundingClientRect();
+        const cx = gr.left + gr.width / 2;
+        const half = gr.width / 2 - 23;            // knob radius
+        const gx = clamp((e.clientX - cx) / half, -1, 1);
+        fj.x = gx;
+        const jr = el.flatjoy.getBoundingClientRect();
+        const up = e.clientY < gr.top - 6;         // snapped above the groove
+        const dn = e.clientY > gr.bottom + 6;      // snapped below it
+        fj.up = up; fj.down = dn && !up;
+        const ky = up ? jr.top + 14 : fj.down ? jr.bottom - 14 : gr.top + gr.height / 2;
+        el.fjKnob.style.left = (cx + gx * half - jr.left) + "px";
+        el.fjKnob.style.top = (ky - jr.top) + "px";
+        el.fjHazeL.classList.toggle("on", gx <= -0.985);
+        el.fjHazeR.classList.toggle("on", gx >= 0.985);
+      };
+      const fjReset = () => {
+        fjPid = -1; fj.x = 0; fj.up = false; fj.down = false;
+        const jr = el.flatjoy.getBoundingClientRect();
+        el.fjKnob.style.left = jr.width / 2 + "px";
+        el.fjKnob.style.top = "";
+        el.fjHazeL.classList.remove("on"); el.fjHazeR.classList.remove("on");
+      };
+      el.flatjoy.addEventListener("pointerdown", (e) => {
+        if (!active || ghostOn || fjPid !== -1) return;
+        fjPid = e.pointerId;
+        try { el.flatjoy.setPointerCapture(e.pointerId); } catch (_) {}
+        fjMove(e); e.preventDefault();
+      });
+      el.flatjoy.addEventListener("pointermove", (e) => { if (e.pointerId === fjPid) fjMove(e); });
+      const fjUp = (e) => { if (e.pointerId === fjPid) fjReset(); };
+      el.flatjoy.addEventListener("pointerup", fjUp);
+      el.flatjoy.addEventListener("pointercancel", fjUp);
+      el.flatjoy.addEventListener("touchstart", killTouchDefault, { passive: false });
 
-      // ghost-mode joystick (testerworld): drag = fly that direction,
-      // deflection = speed. Replaces the walk pads while ghosting.
-      let joyPid = -1;
+      // ── ROUND joystick (ghost mode): appears wherever the finger lands ──
+      // in the BOTTOM half of the screen (never on the ribbon or buttons —
+      // those sit above the canvas and get the touch first). Deflection =
+      // fly direction & speed, no dead zone; at full deflection a blue haze
+      // blooms in that direction. Keeps tracking until touch-up.
+      let joyPid = -1, joyCX = 0, joyCY = 0;
       const JOY_R = 44; // px of max deflection
       const joyMove = (e) => {
-        const r = el.joy.getBoundingClientRect();
-        let dx = e.clientX - (r.left + r.width / 2);
-        let dy = e.clientY - (r.top + r.height / 2);
+        let dx = e.clientX - joyCX, dy = e.clientY - joyCY;
         const m = Math.hypot(dx, dy);
         if (m > JOY_R) { dx *= JOY_R / m; dy *= JOY_R / m; }
         joyVec.x = dx / JOY_R; joyVec.y = dy / JOY_R;
         el.joyKnob.style.transform =
           "translate(calc(-50% + " + dx + "px), calc(-50% + " + dy + "px))";
+        const maxed = m >= JOY_R - 1;
+        if (maxed && m > 0) {
+          const hx = dx / m * (JOY_R + 10), hy = dy / m * (JOY_R + 10);
+          el.joyHaze.style.transform =
+            "translate(calc(-50% + " + hx + "px), calc(-50% + " + hy + "px))";
+          el.joyHaze.style.opacity = "1";
+        } else el.joyHaze.style.opacity = "0";
+      };
+      const joySpawn = (e) => {
+        joyPid = e.pointerId; joyCX = e.clientX; joyCY = e.clientY;
+        el.joy.style.left = (joyCX - 66) + "px";
+        el.joy.style.top = (joyCY - 66) + "px";
+        el.joy.classList.remove("hidden");
+        joyMove(e);
       };
       const joyReset = () => {
         joyPid = -1; joyVec.x = 0; joyVec.y = 0;
+        el.joy.classList.add("hidden");
+        el.joyHaze.style.opacity = "0";
         el.joyKnob.style.transform = "translate(-50%, -50%)";
       };
-      el.joy.addEventListener("pointerdown", (e) => {
-        if (!ghostOn || joyPid !== -1) return;
-        joyPid = e.pointerId;
-        try { el.joy.setPointerCapture(e.pointerId); } catch (_) {}
-        joyMove(e); e.preventDefault();
-      });
-      el.joy.addEventListener("pointermove", (e) => { if (e.pointerId === joyPid) joyMove(e); });
-      const joyUp = (e) => { if (e.pointerId === joyPid) joyReset(); };
-      el.joy.addEventListener("pointerup", joyUp);
-      el.joy.addEventListener("pointercancel", joyUp);
-      el.joy.addEventListener("touchstart", killTouchDefault, { passive: false });
 
       // kill long-press recognition (the tap-and-hold buzz) on the world view
       canvas.addEventListener("touchstart", killTouchDefault, { passive: false });
 
-      // dig / place on the canvas (mouse or touch)
+      // taps on the world: ghost mode turns bottom-half taps into the round
+      // joystick; otherwise the tap USES things — interactables respond,
+      // selected blocks place into empty cells, hand/pick digs blocks
       canvas.addEventListener("pointerdown", (e) => {
-        if (!active || !hasWorld || mine.pid !== -1) return;
+        if (!active || !hasWorld) return;
+        // ghost joystick: bottom half of the screen, free placement
+        if (ghostOn && joyPid === -1 && e.clientY > window.innerHeight / 2) {
+          joySpawn(e);
+          try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+          e.preventDefault();
+          return;
+        }
+        if (mine.pid !== -1) return;
         const [tx, ty] = tileFromEvent(e);
+        const tv = layer === 1 ? getBack(tx, ty) : getTile(tx, ty);
+        // interactables respond to hand or a held block — but a held
+        // PICKAXE always digs (that's how you remove a door or chair)
+        const use = INTERACT.has(tv) && inReach(tx, ty) && !isTool(sel);
         let action;
         if (e.pointerType === "mouse") {
-          // mouse: buttons choose — LMB dig, RMB place
+          // mouse: LMB uses (interact / dig), RMB places the selected block
           if (e.button === 2) action = "place";
-          else if (e.button === 0) action = "dig";
+          else if (e.button === 0) action = "use";
           else return;
         } else {
-          // touch & pen: what you tap chooses, in the SELECTED layer —
-          // an occupied cell means break it, an empty one means build there
           if (e.button !== 0 && e.pointerType !== "touch") return;
-          action = validDigTarget(tx, ty) ? "dig" : "place";
+          action = "use";
         }
+        if (action === "use" && use) { interact(tx, ty, tv); return; }
+        if (action === "use") {
+          // a selected BLOCK only places (into empty cells) — it never digs;
+          // hand or a held pickaxe digs whatever block was touched
+          if (isBlock(sel)) {
+            if (!validDigTarget(tx, ty)) action = "place";
+            else return; // tapped a block with a block in hand → nothing
+          } else action = "dig";
+        }
+        if (action === "place" && !isBlock(sel)) return; // RMB with no block
         mine.pid = e.pointerId; mine.action = action; mine.held = true; mine.placeT = 0;
         if (action === "dig") {
           if (validDigTarget(tx, ty)) { mine.tx = tx; mine.ty = ty; mine.prog = 0; }
@@ -2187,6 +2632,7 @@
         e.preventDefault();
       });
       canvas.addEventListener("pointermove", (e) => {
+        if (e.pointerId === joyPid) { joyMove(e); return; }
         if (e.pointerId !== mine.pid || !mine.held) return;
         const [tx, ty] = tileFromEvent(e);
         if (mine.action === "dig") {
@@ -2199,51 +2645,24 @@
           mine.tx = tx; mine.ty = ty;
         }
       });
-      const release = (e) => { if (e.pointerId === mine.pid) { mine.pid = -1; mine.held = false; } };
+      const release = (e) => {
+        if (e.pointerId === joyPid) joyReset();
+        if (e.pointerId === mine.pid) { mine.pid = -1; mine.held = false; }
+      };
       canvas.addEventListener("pointerup", release);
       canvas.addEventListener("pointercancel", release);
 
       // clean close when the page is backgrounded/killed → no ghost left behind
       window.addEventListener("pagehide", () => { try { if (ws) ws.close(); } catch (_) {} });
     }
-    function bindPad(btn, key) {
-      // pads are HELD down → same long-press buzz as the canvas; kill it too
-      btn.addEventListener("touchstart", killTouchDefault, { passive: false });
-      let pid = null; // the finger currently holding this pad
-      const on = (e) => {
-        if (e.pointerId === mine.pid) return; // that's the dig/build finger
-        e.preventDefault();
-        // undo the implicit touch capture, so a held finger can SLIDE
-        // between ◀ ▶ JUMP and keep driving — no lift-and-retap needed
-        try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
-        pid = e.pointerId;
-        input[key] = true;
-        btn.classList.add("held");
-      };
-      const off = (e) => {
-        if (pid === null || (e && e.pointerId !== pid)) return; // another finger
-        pid = null;
-        input[key] = false;
-        btn.classList.remove("held");
-      };
-      btn.addEventListener("pointerdown", on);
-      // a held finger sliding onto the pad presses it (mouse or touch —
-      // implicit capture was released in `on`, so boundary events flow)
-      btn.addEventListener("pointerover", (e) => { if (e.buttons > 0) on(e); });
-      btn.addEventListener("pointerout", off);
-      btn.addEventListener("pointerup", off);
-      btn.addEventListener("pointercancel", off);
-      window.addEventListener("pointerup", off);      // lifted off anywhere
-      window.addEventListener("pointercancel", off);
-    }
 
     return {
-      start, stop, zoomIn, zoomOut, setPalette, toggleLayer, toggleCraft,
+      start, stop, zoomIn, zoomOut, toggleLayer, toggleCraft, toggleFurnace,
       isActive: () => active,
       hasWorld: () => hasWorld,
       remoteCount: () => remotes.size,
       _debug: {
-        me, remotes, meAnim, get world() { return world; }, get seed() { return seed; },
+        me, remotes, meAnim, fj, joyVec, get world() { return world; }, get seed() { return seed; },
         get pxm() { return pxm; }, getTile, getBack, tileAt: (x, y) => tileAt(x, y),
         backAt: (x, y) => backAt(x, y),
         heightAt, overlay, overlayB, mine,
@@ -2253,9 +2672,10 @@
         get camX() { return camX; }, get camY() { return camY; },
         get ovTiles() { return ovTiles; }, get ovBuiltCol() { return ovBuiltCol; },
         get ovMode() { return pxm <= 2; },
-        inv, T,
+        inv, T, get sel() { return sel; }, setSel, renderRibbon,
+        interact, useDoor, smelt, onLadder, phCur, toggleFurnace, toggleCraft,
         get room() { return curRoom; }, get ghostOn() { return ghostOn; },
-        pickSpeed, craft, PICKS, get picksCrafted() { return picksCrafted; },
+        pickSpeed, bestPickSpeed, craft, PICKS, get picksCrafted() { return picksCrafted; },
       },
     };
   })();
