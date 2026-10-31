@@ -124,8 +124,9 @@ function crownAt(seed, x, y) { // front layer: the leafy crown, else AIR
   }
   return T_AIR;
 }
-// sandy patches: whole columns of ground turn to sand — broad noise blobs
-function sandCol(seed, x) { return fbm1(x / 260, seed + 61, 2) > 0.62; }
+// sandy patches: whole columns of ground turn to sand — small noise blobs
+// (~40–80 columns), little beaches rather than continents
+function sandCol(seed, x) { return fbm1(x / 80, seed + 61, 2) > 0.66; }
 function tileAt(seed, x, y) {
   x |= 0; y |= 0;
   if (y < 0) return T_AIR;

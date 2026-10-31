@@ -143,7 +143,7 @@
   .ritem .n { position: absolute; right: 2px; bottom: 0; font-size: 11px; font-weight: 700;
     color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9); pointer-events: none; }
 
-  /* front/back toggle: right above the ribbon, at the right */
+  /* front/back toggle: right below the ribbon, at the right */
   #btn-layer { align-self: flex-end; width: 46px; height: 46px; border-radius: 50%;
     flex-shrink: 0; margin-right: 2px;
     padding: 0; background: rgba(20,26,46,.66); border: 1px solid var(--border);
@@ -160,15 +160,19 @@
   #fj-groove { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
     height: 34px; border-radius: 99px; background: rgba(20,26,46,.5);
     border: 1px solid var(--border); backdrop-filter: blur(8px); }
+  /* knob & haze are children of the PAD (not the groove): the drag math
+     positions them in pad coordinates, so they track the finger exactly */
   #fj-knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px;
     border-radius: 50%; background: rgba(108,140,255,.45); border: 1px solid rgba(108,140,255,.85);
     transform: translate(-50%, -50%); pointer-events: none; }
-  .fj-haze { position: absolute; top: 50%; width: 30px; height: 30px; border-radius: 50%;
-    background: radial-gradient(circle, rgba(108,160,255,.85), transparent 70%);
-    transform: translateY(-50%); opacity: 0; pointer-events: none;
+  /* the haze hugs the KNOB at its maxed position (knob center stops 23px
+     from the groove's end), glowing out from behind it */
+  .fj-haze { position: absolute; top: 50%; width: 62px; height: 62px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(108,160,255,.8), transparent 70%);
+    transform: translate(-50%, -50%); opacity: 0; pointer-events: none;
     transition: opacity .1s; }
-  .fj-haze.left { left: -4px; }
-  .fj-haze.right { right: -4px; }
+  .fj-haze.left { left: 23px; }
+  .fj-haze.right { left: calc(100% - 23px); }
   .fj-haze.on { opacity: 1; }
 
   /* ghost-mode round joystick: appears where the tap lands (bottom half of
@@ -281,19 +285,18 @@
     <div class="keys-hint">A/D move · Space jump · S crouch · LMB use / RMB place · Q layer · C craft · 1–0 select · +/− zoom</div>
 
     <div class="hud hud-bottom">
-      <!-- front/back sits right above the ribbon, at the right -->
-      <button id="btn-layer" aria-pressed="false"
-              title="Dig &amp; build in the walk-through back layer (Q)">Front</button>
       <!-- inventory ribbon: pure icons, fills right-to-left -->
       <div id="ribbon"></div>
+      <!-- front/back sits right BELOW the ribbon, at the right -->
+      <button id="btn-layer" aria-pressed="false"
+              title="Dig &amp; build in the walk-through back layer (Q)">Front</button>
       <div class="hud-row">
         <!-- flat walk joystick: groove + knob, snap up = jump, down = crouch -->
         <div id="flatjoy" aria-label="Walk joystick">
-          <div id="fj-groove">
-            <div class="fj-haze left" id="fj-haze-l"></div>
-            <div class="fj-haze right" id="fj-haze-r"></div>
-            <div id="fj-knob"></div>
-          </div>
+          <div id="fj-groove"></div>
+          <div class="fj-haze left" id="fj-haze-l"></div>
+          <div class="fj-haze right" id="fj-haze-r"></div>
+          <div id="fj-knob"></div>
         </div>
         <div class="hud-mid">
           <button id="btn-zoom-out" class="sq-btn" aria-label="Zoom out">−</button>
@@ -336,6 +339,8 @@
         <p class="craft-sub">Pickaxes dig faster. Costs are paid from your block inventory.</p>
         <p class="craft-cur" id="craft-cur"></p>
         <div id="craft-list"></div>
+        <p class="craft-sub" style="margin-top:14px">Building blocks — shaped from wood &amp; stone, craft as many as you can afford.</p>
+        <div id="craft-blocks"></div>
       </div>
     </div>
 
@@ -389,6 +394,7 @@
     btnLayer: $("btn-layer"), ribbon: $("ribbon"),
     btnCraft: $("btn-craft"), craftOverlay: $("craft-overlay"),
     btnCraftClose: $("btn-craft-close"), craftList: $("craft-list"), craftCur: $("craft-cur"),
+    craftBlocks: $("craft-blocks"),
     furnOverlay: $("furn-overlay"), furnBody: $("furn-body"), btnFurnClose: $("btn-furn-close"),
     btnGhost: $("btn-ghost"), flatjoy: $("flatjoy"), fjGroove: $("fj-groove"), fjKnob: $("fj-knob"),
     fjHazeL: $("fj-haze-l"), fjHazeR: $("fj-haze-r"),
@@ -921,9 +927,10 @@
       }
       return T.AIR;
     }
-    // sandy patches: whole columns of ground turn to sand — broad noise
-    // blobs so beaches read as places, not speckles (KEEP IN SYNC worker)
-    function sandCol(x) { return fbm1(x / 260, seed + 61, 2) > 0.62; }
+    // sandy patches: whole columns of ground turn to sand — small noise
+    // blobs (~40–80 columns) so beaches read as little places, not
+    // continents, and never as single-block speckles (KEEP IN SYNC worker)
+    function sandCol(x) { return fbm1(x / 80, seed + 61, 2) > 0.66; }
     function tileAt(x, y) {
       x |= 0; y |= 0;
       if (y < 0) return T.AIR;
@@ -1045,7 +1052,7 @@
         const b = document.createElement("button");
         b.type = "button";
         b.className = "ritem" + (sel === id ? " sel" : "");
-        b.title = isTool(id) ? PICKS[id - PICKBASE].name : (TNAME[id] || "block");
+        b.title = isTool(id) ? ((PICKS[bestPickTier()] || {}).name || "Pickaxe") : (TNAME[id] || "block");
         const sw = document.createElement("span");
         sw.className = "sw";
         if (isTool(id)) { sw.classList.add("pick"); sw.textContent = "⛏"; }
@@ -1074,6 +1081,32 @@
       { name: "Golden Pickaxe",  speed: 4.8, cost: { 5: 2, 4: 7 } },
       { name: "Diamond Pickaxe", speed: 6.2, cost: { 5: 2, 14: 8 } },
     ];
+    // ── craftable building blocks: repeatable recipes, paid in wood & ──
+    // stone (glass is NOT here — it is smelted from sand in the furnace)
+    const CRAFTS = [
+      { name: "Door", gives: [T.DOOR, 2], cost: { 5: 6 },
+        blurb: "Tap to swing open — neighbours join into one big door" },
+      { name: "Ladder", gives: [T.LADDER, 4], cost: { 5: 3 },
+        blurb: "Jump to climb, crouch to descend, hang in between" },
+      { name: "Table", gives: [T.TABLE, 1], cost: { 5: 3 },
+        blurb: "Walk past it, land on top — crouch to drop through" },
+      { name: "Chair", gives: [T.CHAIR, 1], cost: { 5: 2 },
+        blurb: "Tap to sit down, tap again to stand up" },
+      { name: "Furnace", gives: [T.FURNACE, 1], cost: { 3: 8 },
+        blurb: "Burns coal to melt sand into glass" },
+      { name: "Railing", gives: [T.RAILING, 4], cost: { 5: 2 },
+        blurb: "A fence you will NOT auto-climb over" },
+    ];
+    function craftBlock(i) {
+      const r = CRAFTS[i];
+      if (!r) return;
+      for (const [t, n] of Object.entries(r.cost))
+        if ((inv.get(+t) || 0) < n) return; // can't afford
+      for (const [t, n] of Object.entries(r.cost)) invAdd(+t, -n);
+      invAdd(r.gives[0], r.gives[1]);
+      setStatus(el.roomStatus, "Crafted " + r.name + " ×" + r.gives[1] + "!", "ok");
+      renderCraft();
+    }
     const SLOTCOL = { 2: "#6b4a30", 3: "#57617e", 4: "#a88428", 5: "#8a6238", 7: "#3f7a34",
                       8: "#3d4459", 9: "#272b3b", 10: "#15171f", 12: "#b87333",
                       13: "#b6aea2", 14: "#4ec3d8", 15: "#7a5836", 17: "#9a7448",
@@ -1088,10 +1121,13 @@
     let picksCrafted;
     try { picksCrafted = new Set(JSON.parse(localStorage.getItem("vr-picks") || "[]")); }
     catch (_) { picksCrafted = new Set(); }
-    // digging speed comes from the SELECTED pickaxe — bare hand is ×1
+    // digging speed comes from the SELECTED pickaxe — bare hand is ×1.
+    // There is only ONE pickaxe slot in the ribbon; it automatically
+    // swings at your BEST crafted tier, so upgrading needs no micromanaging.
     function pickSpeed() {
-      return isTool(sel) && PICKS[sel - PICKBASE] ? PICKS[sel - PICKBASE].speed : 1;
+      return isTool(sel) ? bestPickSpeed() : 1;
     }
+    function bestPickTier() { let b = -1; for (const i of picksCrafted) b = Math.max(b, i); return b; }
     function bestPickSpeed() {
       let s = 1;
       for (const i of picksCrafted) if (PICKS[i]) s = Math.max(s, PICKS[i].speed);
@@ -1105,7 +1141,8 @@
       for (const [t, n] of Object.entries(p.cost)) invAdd(+t, -n);
       picksCrafted.add(i);
       try { localStorage.setItem("vr-picks", JSON.stringify([...picksCrafted])); } catch (_) {}
-      invAdd(PICKBASE + i, 1); // the pickaxe itself becomes a ribbon item
+      inv.set(PICKBASE, 1); // one pickaxe slot — always the best tier owned
+      renderRibbon();
       setStatus(el.roomStatus, "Crafted " + p.name + " — select it to dig ×" + p.speed + "!", "ok");
       renderCraft();
     }
@@ -1145,6 +1182,36 @@
         }
         row.appendChild(info); row.appendChild(btn);
         el.craftList.appendChild(row);
+      });
+      // ── building blocks: repeatable recipes (no ownership state) ──
+      el.craftBlocks.innerHTML = "";
+      CRAFTS.forEach((r, i) => {
+        const row = document.createElement("div");
+        row.className = "craft-row";
+        const info = document.createElement("div");
+        info.className = "craft-info";
+        info.innerHTML = '<div class="craft-name"></div>' +
+          '<div class="craft-speed"></div>';
+        info.querySelector(".craft-name").textContent = r.name + " ×" + r.gives[1];
+        info.querySelector(".craft-speed").textContent = r.blurb;
+        const cost = document.createElement("div");
+        cost.className = "craft-cost";
+        for (const [t, n] of Object.entries(r.cost)) {
+          const have = inv.get(+t) || 0;
+          const chip = document.createElement("span");
+          chip.className = "craft-chip" + (have < n ? " lack" : "");
+          chip.innerHTML = '<span class="sw"></span><span class="ct"></span>';
+          chip.querySelector(".sw").style.background = SLOTCOL[t] || "#888";
+          chip.querySelector(".ct").textContent = Math.min(have, n) + "/" + n + " " + TNAME[t];
+          cost.appendChild(chip);
+        }
+        info.appendChild(cost);
+        const btn = document.createElement("button");
+        const ok = Object.entries(r.cost).every(([t, n]) => (inv.get(+t) || 0) >= n);
+        btn.textContent = "Craft"; btn.disabled = !ok; btn.className = "btn-primary craft-btn";
+        btn.addEventListener("click", () => craftBlock(i));
+        row.appendChild(info); row.appendChild(btn);
+        el.craftBlocks.appendChild(row);
       });
     }
     function toggleCraft() {
@@ -1737,7 +1804,7 @@
       hcache.clear(); lavaGlowTop.clear(); ovTiles = []; ovBuiltCol = 0; ovPendingZoom = 0;
       pxm = 48; setLayer(0);
       inv.clear(); sel = 0;
-      for (const i of picksCrafted) inv.set(PICKBASE + i, 1); // crafted picks persist
+      if (picksCrafted.size) inv.set(PICKBASE, 1); // one slot = your best pick
       renderRibbon();
       me.crouch = false; me.seated = null; me.onPlatform = false; me.dropT = 0;
       mine.pid = -1; mine.held = false; mine.tx = -1; mine.prog = 0;
@@ -2437,11 +2504,11 @@
         ctx.save();
         ctx.translate(x + 0.68, y + 0.62);       // right shoulder pivot
         ctx.rotate(an.armR || 0);
-        if (isTool(sel)) { // pickaxe: handle + angled head
+        if (isTool(sel)) { // pickaxe: fist grips the handle's BOTTOM, head up
           ctx.fillStyle = "#7a5a34";
-          ctx.fillRect(-0.03, 0.42, 0.06, 0.34);
+          ctx.fillRect(-0.03, 0.06, 0.06, 0.40);  // handle rises from the fist
           ctx.fillStyle = "#9aa2b4";
-          ctx.fillRect(-0.16, 0.38, 0.38, 0.09);
+          ctx.fillRect(-0.16, -0.02, 0.38, 0.09); // head at the far (top) end
         } else {           // block swatch with a soft outline
           ctx.fillStyle = SLOTCOL[sel] || "#888";
           ctx.fillRect(-0.12, 0.44, 0.28, 0.28);
@@ -2676,6 +2743,7 @@
         interact, useDoor, smelt, onLadder, phCur, toggleFurnace, toggleCraft,
         get room() { return curRoom; }, get ghostOn() { return ghostOn; },
         pickSpeed, bestPickSpeed, craft, PICKS, get picksCrafted() { return picksCrafted; },
+        craftBlock, CRAFTS,
       },
     };
   })();
