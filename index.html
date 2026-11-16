@@ -3,336 +3,1239 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0b0f1d">
-<title>Squares</title>
+<meta name="theme-color" content="#6aa7ff">
+<title>Squares: dig and build together</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent;
       -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
-  input { user-select: text; -webkit-user-select: text; }
-  html, body { height: 100%; overscroll-behavior: none; }
-  body { font-family: system-ui, -apple-system, sans-serif; background: #0b0f1d; color: #e9edfb; }
+  html, body { height: 100%; overflow: hidden; background: #6aa7ff; overscroll-behavior: none; font-family: system-ui, sans-serif; }
+  canvas#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
   .hidden { display: none !important; }
 
-  #join { max-width: 420px; margin: 0 auto; padding: 48px 20px; display: flex; flex-direction: column; gap: 14px; }
-  #join h1 { text-align: center; font-size: 26px; margin-bottom: 8px; }
-  #join label { font-size: 13px; color: #97a1c4; }
-  #join input { width: 100%; margin-top: 6px; padding: 13px; font-size: 16px; border-radius: 12px;
-      border: 1px solid rgba(255,255,255,.12); background: #0d1226; color: inherit; outline: none; }
-  button { font: inherit; color: inherit; border: none; cursor: pointer; touch-action: none; }
-  #btn-join { padding: 15px; font-size: 16px; font-weight: 650; border-radius: 12px; color: #fff;
-      background: linear-gradient(135deg, #6c8cff, #8f6cff); touch-action: manipulation; }
-  #btn-join:disabled { opacity: .5; }
-  #status { min-height: 20px; text-align: center; font-size: 14px; color: #97a1c4; }
-  #status.err { color: #ff6b6b; }
+  /* join screen */
+  #join { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px;
+          background: linear-gradient(#6aa7ff, #b9d8ff 60%, #6b4a2b 60%, #4b321c); }
+  #join .card { width: min(380px, 100%); padding: 20px; border-radius: 16px; background: rgba(11,15,29,.88); color: #e9edfb; display: grid; gap: 12px; }
+  #join h1 { font-size: 22px; }
+  #join p { font-size: 13px; opacity: .8; line-height: 1.4; }
+  #join label { display: grid; gap: 4px; font-size: 12px; opacity: .9; }
+  #join input { font: 16px system-ui; padding: 11px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff; user-select: text; -webkit-user-select: text; }
+  #join button { font: 700 16px system-ui; padding: 13px; border-radius: 10px; border: 0; background: #4f6bff; color: #fff; }
+  #join button:disabled { opacity: .5; }
+  #status { min-height: 18px; font-size: 13px; color: #9fd3ff; } #status.err { color: #ff8a8a; }
 
-  #room canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
-  #top { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between;
-      align-items: center; padding: 12px; z-index: 2; }
-  #info { background: rgba(13,18,38,.7); padding: 8px 14px; border-radius: 12px; font-size: 14px; }
-  #btn-leave { background: rgba(255,107,107,.2); border: 1px solid rgba(255,107,107,.4);
-      color: #ffb3b3; padding: 9px 16px; border-radius: 12px; touch-action: manipulation; }
-  #bottom { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between;
-      align-items: flex-end; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); z-index: 2; }
+  /* game UI */
+  #hud { position: fixed; top: 8px; left: 8px; z-index: 2; padding: 5px 8px; border-radius: 8px; pointer-events: none;
+         font: 11px/1.4 ui-monospace, Menlo, monospace; color: #e9edfb; background: rgba(11,15,29,.6); white-space: pre; }
+  .row { position: fixed; right: 8px; z-index: 2; display: flex; gap: 6px; }
+  #r1 { top: 8px; } #r2 { top: 56px; }
+  #toast { position: fixed; top: 108px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 7px 14px; border-radius: 999px;
+           font: 600 13px system-ui, sans-serif; color: #fff; background: rgba(11,15,29,.8); opacity: 0; transition: opacity .25s; pointer-events: none; white-space: nowrap; }
+  #conn { position: fixed; top: 60px; left: 8px; z-index: 3; padding: 6px 10px; border-radius: 8px; font: 700 12px system-ui; color: #fff; background: #b5563a; pointer-events: none; }
+  #hotbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(112px + env(safe-area-inset-bottom)); z-index: 2;
+            display: flex; gap: 6px; padding: 6px; border-radius: 12px; background: rgba(11,15,29,.55); }
+  .slot { position: relative; width: 44px; height: 44px; border-radius: 8px; border: 2px solid rgba(255,255,255,.2); background: rgba(20,26,46,.7); padding: 3px; touch-action: manipulation; }
+  .slot canvas { position: static; width: 100%; height: 100%; image-rendering: pixelated; touch-action: manipulation; }
+  .slot i { position: absolute; left: 3px; top: 0; font: 700 10px system-ui; color: #fff; font-style: normal; text-shadow: 0 0 3px #000; }
+  .slot.sel { border-color: #fff; background: rgba(79,107,255,.55); }
+  #bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; justify-content: space-between;
+            align-items: flex-end; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); pointer-events: none; }
+  #bottom > * { pointer-events: auto; }
   .pad { display: flex; gap: 10px; }
-  .pbtn { width: 68px; height: 68px; border-radius: 50%; font-size: 22px; color: #e9edfb;
-      background: rgba(20,26,46,.7); border: 1px solid rgba(255,255,255,.15); }
-  .pbtn.held { background: rgba(108,140,255,.5); }
-  #bj { width: 84px; height: 84px; font-size: 14px; font-weight: 700; }
-  #btn-mute { width: 52px; height: 52px; border-radius: 50%; font-size: 22px; touch-action: manipulation;
-      background: rgba(53,217,154,.25); border: 1px solid rgba(53,217,154,.6); }
-  #btn-mute.muted { background: rgba(255,107,107,.25); border-color: rgba(255,107,107,.6); }
-  #audio-out { display: none; }
+  #game button { font: 600 14px system-ui, sans-serif; color: #e9edfb; border: 1px solid rgba(255,255,255,.2); touch-action: none; cursor: pointer; background: rgba(20,26,46,.66); }
+  .small { border-radius: 8px; padding: 9px 12px; touch-action: manipulation; }
+  .pbtn { width: 72px; height: 72px; border-radius: 50%; font-size: 24px; }
+  #bj { width: 88px; height: 88px; font-size: 14px; }
+  .pbtn.held { background: rgba(108,140,255,.75); }
+  #bmode.place { background: #2f8f5b; } #bmode.mine { background: #b5563a; }
+  #blayer.back { background: #4a3b86; }
+  #bmute.muted { background: #b5313a; }
 </style>
 </head>
 <body>
 
-<main id="join">
-  <h1>Squares</h1>
-  <label>Room name <input id="in-room" placeholder="e.g. squad" maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
-  <label>Your name <input id="in-name" placeholder="e.g. Alex" maxlength="32"></label>
-  <button id="btn-join">Join</button>
-  <p id="status"></p>
-</main>
+<div id="join">
+  <div class="card">
+    <h1>⛏ Squares</h1>
+    <p>Dig and build a shared world with friends. Voice gets louder when you're close to someone.</p>
+    <label>Room name <input id="in-room" type="text" placeholder="e.g. squad" autocomplete="off" autocapitalize="none" maxlength="32"></label>
+    <label>Your name <input id="in-name" type="text" placeholder="e.g. Alex" autocomplete="off" maxlength="32"></label>
+    <button id="btn-join">Join</button>
+    <div id="status"></div>
+  </div>
+</div>
 
-<main id="room" class="hidden">
+<div id="game" class="hidden">
   <canvas id="c"></canvas>
-  <div id="top">
-    <div id="info"></div>
-    <button id="btn-leave">Leave</button>
-  </div>
+  <div id="hud"></div>
+  <div id="conn" class="hidden"></div>
+  <div id="toast"></div>
+  <div class="row" id="r1"><button class="small" id="bmute">🎤</button><button class="small" id="zo">−</button><button class="small" id="zi">+</button><button class="small" id="resp">⟲</button></div>
+  <div class="row" id="r2"><button class="small" id="bleave">Leave</button><button class="small" id="binvite">🔗</button><button class="small mine" id="bmode">⛏ Mine</button><button class="small" id="blayer">Front</button></div>
+  <div id="hotbar"></div>
   <div id="bottom">
-    <div class="pad">
-      <button id="bl" class="pbtn">◀</button>
-      <button id="br" class="pbtn">▶</button>
-    </div>
-    <button id="btn-mute">🎤</button>
-    <button id="bj" class="pbtn">JUMP</button>
+    <div class="pad"><button class="pbtn" id="bl">◀</button><button class="pbtn" id="br">▶</button></div>
+    <button class="pbtn" id="bj">JUMP</button>
   </div>
-</main>
-
+</div>
 <div id="audio-out"></div>
 
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.23.0/dist/livekit-client.umd.js"></script>
+<script>
+/* ═══ world.js ═══ */
+// ═══════════════════════════════════════════════════════════════
+//  world.js — world data + procedural terrain generator  (step 1)
+//
+//  Works as a plain <script> (global `World`) and in Node (require).
+//  No rendering, no networking. Pure data.
+//
+//  World:  W × H tiles, y = 0 at the top, y grows DOWNWARD.
+//          Surface is around y = SURFACE (1000).
+//  Layers: FRONT (0) = solid blocks you collide with
+//          BACK  (1) = background wall; any block id may live here
+//  Chunks: CH × CH tiles, generated lazily from the seed, cached.
+//          Player edits are remembered separately so they survive
+//          a chunk being dropped and regenerated.
+// ═══════════════════════════════════════════════════════════════
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.World = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const CH = 32;                    // chunk size in tiles
+  const CHUNKS_X = 313, CHUNKS_Y = 63;
+  const W = CHUNKS_X * CH;          // 10016
+  const H = CHUNKS_Y * CH;          // 2016
+  const SURFACE = 1000;
+
+  const B = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, COAL: 4, IRON: 5, GOLD: 6, BEDROCK: 7 };
+  const NAMES = ["air", "grass", "dirt", "stone", "coal", "iron", "gold", "bedrock"];
+  const SOLID = [0, 1, 1, 1, 1, 1, 1, 1];
+  const FRONT = 0, BACK = 1;
+
+  // ── deterministic noise ─────────────────────────────────────
+  function hash(x, y, s) {
+    let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ Math.imul(s, 0x9e3779b1);
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;      // 0..1
+  }
+  function vnoise1(x, s) {                              // smooth 1-D, 0..1
+    const xi = Math.floor(x), f = x - xi, u = f * f * (3 - 2 * f);
+    const a = hash(xi, 0, s);
+    return a + (hash(xi + 1, 0, s) - a) * u;
+  }
+  function vnoise2(x, y, s) {                           // smooth 2-D, 0..1
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const a = hash(xi, yi, s), b = hash(xi + 1, yi, s);
+    const c = hash(xi, yi + 1, s), d = hash(xi + 1, yi + 1, s);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  }
+
+  function create(seed) {
+    seed = seed | 0;
+
+    // per-column data, cheap enough to build up front (10 016 columns)
+    const heights = new Int16Array(W);   // y of the grass tile
+    const dirt = new Uint8Array(W);      // dirt thickness under grass (3..5)
+    let minSurface = H;
+    for (let x = 0; x < W; x++) {
+      const off =
+        34 * (vnoise1(x / 400, seed + 1) * 2 - 1) +
+        14 * (vnoise1(x / 130, seed + 2) * 2 - 1) +
+         6 * (vnoise1(x / 45, seed + 3) * 2 - 1) +
+         2 * (vnoise1(x / 14, seed + 4) * 2 - 1);
+      heights[x] = SURFACE + Math.round(off);
+      dirt[x] = 3 + Math.floor(hash(x, 0, seed + 41) * 3);
+      if (heights[x] < minSurface) minSurface = heights[x];
+    }
+
+    const chunks = new Map();            // key -> { cx, cy, front, back }
+    const edits = new Map();             // key -> Map(localIndex*2+layer -> id)
+    const key = (cx, cy) => cy * CHUNKS_X + cx;
+
+    function isCave(x, y, d) {
+      const k = Math.min(1, (d - 4) / 16);                       // tiny near the surface
+      const t = (0.07 + 0.05 * Math.min(1, d / 500)) * k;        // wider when deep
+      const a = vnoise2(x * 0.05, y * 0.07, seed + 11) - 0.5;
+      if (a > t || a < -t) return false;                         // cheap early out
+      const b = vnoise2(x * 0.05, y * 0.07, seed + 12) - 0.5;
+      return b <= t && b >= -t;                                  // two bands cross = tunnel
+    }
+    function ore(x, y, d) {
+      if (d <= 8) return B.STONE;
+      // warp the sample point so ore patches are blobs, not grid-aligned boxes
+      const wx = (vnoise2(x * 0.09, y * 0.09, seed + 51) - 0.5) * 9;
+      const wy = (vnoise2(x * 0.09, y * 0.09, seed + 52) - 0.5) * 9;
+      if (d > 250 && vnoise2((x + wx) * 0.2, (y + wy) * 0.2, seed + 23) > 0.93) return B.GOLD;
+      if (d > 60 && vnoise2((x + wx) * 0.17, (y + wy) * 0.17, seed + 22) > 0.9) return B.IRON;
+      if (vnoise2((x + wx) * 0.15, (y + wy) * 0.15, seed + 21) > 0.87) return B.COAL;
+      return B.STONE;
+    }
+
+    function generate(cx, cy) {
+      const front = new Uint8Array(CH * CH);
+      const back = new Uint8Array(CH * CH);
+      const x0 = cx * CH, y0 = cy * CH;
+      if (y0 + CH <= minSurface) return { cx, cy, front, back };  // pure sky: skip work
+
+      for (let ly = 0; ly < CH; ly++) {
+        const y = y0 + ly;
+        for (let lx = 0; lx < CH; lx++) {
+          const x = x0 + lx, s = heights[x];
+          if (y < s) continue;                                     // sky
+          const i = ly * CH + lx;
+          const d = y - s, dd = dirt[x];
+
+          back[i] = d < dd ? B.DIRT : B.STONE;                     // back wall is always full
+
+          let t;
+          if (y >= H - 1 - Math.floor(hash(x, 0, seed + 31) * 4)) t = B.BEDROCK;  // 1..4 thick
+          else if (d === 0) t = B.GRASS;
+          else if (d < dd) t = B.DIRT;
+          else t = B.STONE;
+          if (t !== B.BEDROCK && d > 4 && isCave(x, y, d)) t = B.AIR;
+          else if (t === B.STONE) t = ore(x, y, d);
+          front[i] = t;
+        }
+      }
+      return { cx, cy, front, back };
+    }
+
+    function getChunk(cx, cy) {
+      const k = key(cx, cy);
+      let c = chunks.get(k);
+      if (c) return c;
+      c = generate(cx, cy);
+      const e = edits.get(k);
+      if (e) for (const [ek, id] of e) (ek & 1 ? c.back : c.front)[ek >> 1] = id;
+      chunks.set(k, c);
+      return c;
+    }
+
+    function getTile(x, y, layer) {
+      if (y < 0) return B.AIR;                                     // open sky above
+      if (x < 0 || x >= W || y >= H) return layer === BACK ? B.STONE : B.BEDROCK;
+      const c = getChunk((x / CH) | 0, (y / CH) | 0);
+      return (layer === BACK ? c.back : c.front)[(y % CH) * CH + (x % CH)];
+    }
+
+    function setTile(x, y, layer, id) {
+      if (x < 0 || x >= W || y < 0 || y >= H || !(id >= 0 && id < NAMES.length)) return false;
+      const cx = (x / CH) | 0, cy = (y / CH) | 0;
+      const c = getChunk(cx, cy);
+      const i = (y % CH) * CH + (x % CH);
+      const arr = layer === BACK ? c.back : c.front;
+      if (arr[i] === id) return false;
+      arr[i] = id;
+      const k = key(cx, cy);
+      let e = edits.get(k);
+      if (!e) { e = new Map(); edits.set(k, e); }
+      e.set(i * 2 + (layer === BACK ? 1 : 0), id);
+      return true;
+    }
+
+    return {
+      seed, W, H, CH, SURFACE,
+      getChunk, getTile, setTile,
+      solidAt(x, y) { return SOLID[getTile(x, y, FRONT)] === 1; },   // collision query (front layer only)
+      dropChunk(cx, cy) { chunks.delete(key(cx, cy)); },
+      reset() { chunks.clear(); edits.clear(); },                  // forget every edit (the server is about to resend them all)
+      loadEdits(flat) {                                            // flat = [x, y, layer, id, x, y, layer, id, ...]; no chunk generation needed
+        for (let i = 0; i + 3 < flat.length; i += 4) {
+          const x = flat[i], y = flat[i + 1], layer = flat[i + 2], id = flat[i + 3];
+          if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x >= W || y < 0 || y >= H || !(id >= 0 && id < NAMES.length)) continue;
+          const cx = (x / CH) | 0, cy = (y / CH) | 0, k = key(cx, cy), li = (y % CH) * CH + (x % CH);
+          let e = edits.get(k);
+          if (!e) { e = new Map(); edits.set(k, e); }
+          e.set(li * 2 + (layer === BACK ? 1 : 0), id);
+          const c = chunks.get(k);
+          if (c) (layer === BACK ? c.back : c.front)[li] = id;     // chunk already built: patch it in place
+        }
+      },
+      surfaceY(x) { return heights[Math.max(0, Math.min(W - 1, x | 0))]; },
+      loadedChunks() { return chunks.size; },
+      exportEdits() {                                              // [[x, y, layer, id], ...]
+        const out = [];
+        for (const [k, e] of edits) {
+          const cx = k % CHUNKS_X, cy = (k / CHUNKS_X) | 0;
+          for (const [ek, id] of e) {
+            const i = ek >> 1;
+            out.push([cx * CH + (i % CH), cy * CH + ((i / CH) | 0), ek & 1, id]);
+          }
+        }
+        return out;
+      },
+    };
+  }
+
+  return { create, W, H, CH, CHUNKS_X, CHUNKS_Y, SURFACE, B, NAMES, SOLID, FRONT, BACK };
+});
+</script>
+<script>
+/* ═══ textures.js ═══ */
+// ═══════════════════════════════════════════════════════════════
+//  textures.js — procedural block textures  (step 2)
+//
+//  16×16 grainy pixel tiles drawn in code, no image files.
+//  Plain <script> (global `Textures`) or Node (for tests).
+//
+//  Atlas layout:  one tile per block id, left to right.
+//                 row 0 = FRONT layer, row 1 = BACK layer (same tiles, darker)
+//                 source rect for a tile:  x = id * S,  y = layer * S,  size S × S
+//  Block order must match World ids: air, grass, dirt, stone, coal, iron, gold, bedrock.
+// ═══════════════════════════════════════════════════════════════
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.Textures = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const S = 16;
+  const NAMES = ["air", "grass", "dirt", "stone", "coal", "iron", "gold", "bedrock"];
+  const N = NAMES.length;
+  const BACK_DARK = 0.5;                      // back-layer brightness multiplier
+
+  const DIRT = [134, 96, 67], GRASS = [92, 158, 52], STONE = [128, 128, 128], BED = [48, 48, 54];
+  const COAL = [28, 28, 30], IRON = [214, 168, 138], GOLD = [250, 214, 52];
+  const STONE_SEED = 1291;                    // all stone-based tiles share the same stone grain
+
+  function hash(x, y, s) {
+    let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ Math.imul(s, 0x9e3779b1);
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  // per-pixel jitter + 2×2 blotches, snapped to steps so it looks like hand-placed pixel noise
+  function grain(x, y, seed, amp) {
+    const fine = (hash(x, y, seed) - 0.5) * amp;
+    const blot = (hash(x >> 1, y >> 1, seed + 7) - 0.5) * amp * 0.8;
+    return Math.round((fine + blot) / 6) * 6;
+  }
+  const shade = (c, d) => [c[0] + d, c[1] + d, c[2] + d];
+
+  // small 2×2 (sometimes 3-wide) clusters of ore pixels
+  function spots(seed, count) {
+    const m = new Uint8Array(S * S);
+    for (let k = 0; k < count; k++) {
+      const cx = 1 + Math.floor(hash(k, 1, seed) * (S - 3));
+      const cy = 1 + Math.floor(hash(k, 2, seed) * (S - 3));
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++)
+        if (hash(cx + dx, cy + dy, seed + k) > 0.2) m[(cy + dy) * S + cx + dx] = 1;
+      if (hash(k, 3, seed) > 0.5) m[cy * S + cx + 2] = 1;
+    }
+    return m;
+  }
+
+  // RGBA pixels (Uint8ClampedArray, S*S*4) of one front-layer tile
+  function tilePixels(id) {
+    const out = new Uint8ClampedArray(S * S * 4);
+    if (id === 0) return out;                               // air: fully transparent
+    const seed = 1000 + id * 97;
+    const ore = id === 4 ? spots(seed, 5) : id === 5 ? spots(seed, 4) : id === 6 ? spots(seed, 3) : null;
+    const oreCol = id === 4 ? COAL : id === 5 ? IRON : GOLD;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        let c;
+        if (id === 1) {                                     // grass: ragged green top over dirt
+          const depth = 3 + Math.floor(hash(x, 0, seed) * 3);
+          c = y < depth ? shade(GRASS, grain(x, y, seed, 34) + (y === 0 ? 10 : 0)) : shade(DIRT, grain(x, y, seed + 1, 40));
+        } else if (id === 2) c = shade(DIRT, grain(x, y, seed, 44));
+        else if (id === 7) c = shade(BED, grain(x, y, seed, 60));
+        else {                                              // stone and ores
+          c = shade(STONE, grain(x, y, STONE_SEED, 40));
+          if (ore && ore[y * S + x]) c = shade(oreCol, grain(x, y, seed, 24));
+        }
+        const i = (y * S + x) * 4;
+        out[i] = c[0]; out[i + 1] = c[1]; out[i + 2] = c[2]; out[i + 3] = 255;
+      }
+    }
+    return out;
+  }
+
+  // same tile, darkened: this is what a block looks like in the back layer
+  function backPixels(id) {
+    const p = tilePixels(id);
+    for (let i = 0; i < p.length; i += 4) {
+      p[i] = Math.round(p[i] * BACK_DARK); p[i + 1] = Math.round(p[i + 1] * BACK_DARK); p[i + 2] = Math.round(p[i + 2] * BACK_DARK);
+    }
+    return p;
+  }
+
+  // browser (or worker): bake everything into one atlas canvas
+  function build() {
+    const w = S * N, h = S * 2;
+    const canvas = typeof document !== "undefined"
+      ? Object.assign(document.createElement("canvas"), { width: w, height: h })
+      : new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext("2d");
+    for (let layer = 0; layer < 2; layer++)
+      for (let id = 0; id < N; id++)
+        ctx.putImageData(new ImageData(layer ? backPixels(id) : tilePixels(id), S, S), id * S, layer * S);
+    return { canvas, S, N };
+  }
+
+  return { S, N, NAMES, BACK_DARK, tilePixels, backPixels, build };
+});
+</script>
+<script>
+/* ═══ renderer.js ═══ */
+// ═══════════════════════════════════════════════════════════════
+//  renderer.js — chunk renderer  (step 3)
+//
+//  Draws the world with Canvas2D, fast:
+//   • each 32×32 chunk is painted ONCE onto its own offscreen canvas
+//     (back wall + front blocks combined) and then just blitted;
+//   • only chunks on screen are drawn, plus a ring around them is
+//     pre-built so scrolling never stalls;
+//   • at most `buildBudget` chunks are built per frame;
+//   • all-sky chunks cost nothing (no canvas);
+//   • old chunks are evicted (oldest-used first) so memory stays flat
+//     however far you travel. Evicted chunks are also dropped from the
+//     World cache; player edits live in World and are re-applied.
+//   • tileChanged(x, y) repaints a single tile after an edit.
+//
+//  Plain <script> (global `Renderer`) or Node (tests use stub canvases).
+// ═══════════════════════════════════════════════════════════════
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.Renderer = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const SKY = "#6aa7ff";
+  const VOID = "#0a0a12";   // an empty tile below the original surface (front AND back removed)
+
+  // chunk index range covered by the view (camera is the view centre, in tiles)
+  function visibleRange(camX, camY, vw, vh, tilePx, CH, CX, CY, margin) {
+    const m = margin || 0, hw = vw / tilePx / 2, hh = vh / tilePx / 2;
+    const clamp = (v, hi) => Math.max(0, Math.min(hi, v));
+    return {
+      cx0: clamp(Math.floor((camX - hw) / CH) - m, CX - 1),
+      cx1: clamp(Math.floor((camX + hw) / CH) + m, CX - 1),
+      cy0: clamp(Math.floor((camY - hh) / CH) - m, CY - 1),
+      cy1: clamp(Math.floor((camY + hh) / CH) + m, CY - 1),
+    };
+  }
+
+  function defaultFactory(w, h) {
+    if (typeof document !== "undefined") return Object.assign(document.createElement("canvas"), { width: w, height: h });
+    return new OffscreenCanvas(w, h);
+  }
+
+  function create(opts) {
+    const world = opts.world, atlas = opts.atlas;
+    const S = atlas.S, CH = world.CH, CX = world.W / CH, CY = world.H / CH;
+    const mk = opts.canvasFactory || defaultFactory;
+    const maxChunks = opts.maxChunks || 48;          // ~1 MB per solid chunk canvas
+    const buildBudget = opts.buildBudget || 4;       // chunk builds allowed per frame...
+    const buildMs = opts.buildMs || 6;               // ...and stop starting new ones after this many ms (always at least one, so the view fills in)
+    const clock = typeof performance !== "undefined" && performance.now ? () => performance.now() : () => Date.now();
+    const cache = new Map();                         // key -> { cx, cy, empty, cv, ctx }  (Map order = least recently used first)
+    const stats = { built: 0, drawn: 0, cached: 0, evicted: 0 };
+    const key = (cx, cy) => cy * CX + cx;
+
+    function isEmpty(c) {
+      for (let i = 0; i < c.front.length; i++) if (c.front[i] | c.back[i]) return false;
+      return true;
+    }
+
+    // paint one tile into its chunk canvas (the caller clears it first when repainting)
+    function paint(e, c, lx, ly) {
+      const i = ly * CH + lx, f = c.front[i], id = f || c.back[i];     // front blocks are opaque: skip the wall behind them
+      if (id) e.ctx.drawImage(atlas.canvas, id * S, f ? 0 : S, S, S, lx * S, ly * S, S, S);
+      else if (e.cy * CH + ly >= world.surfaceY(e.cx * CH + lx)) {     // hole below ground: dark void, not sky
+        e.ctx.fillStyle = VOID;
+        e.ctx.fillRect(lx * S, ly * S, S, S);
+      }
+    }
+
+    // Fast path: copy atlas pixels straight into one ImageData and upload it once per chunk,
+    // instead of ~1000 drawImage calls (about 4x quicker, which matters on phones). Falls back to drawImage
+    // when pixel access isn't available. Output is pixel-identical (tiles are opaque; empty tiles stay transparent).
+    let fast = null;
+    if (opts.fastPaint !== false && new Uint8Array(new Uint32Array([1]).buffer)[0] === 1) {   // little-endian only
+      try {
+        const ac = atlas.canvas && atlas.canvas.getContext && atlas.canvas.getContext("2d");
+        if (ac && ac.getImageData) fast = { px: new Uint32Array(ac.getImageData(0, 0, atlas.canvas.width, atlas.canvas.height).data.buffer), aw: atlas.canvas.width };
+      } catch (_) { fast = null; }
+    }
+    const VOID32 = 0xff120a0a;                       // #0a0a12, opaque, as little-endian RGBA
+    function paintFast(e, c) {
+      const N = S * CH, img = e.ctx.createImageData(N, N), dst = new Uint32Array(img.data.buffer), px = fast.px, aw = fast.aw;
+      for (let ly = 0; ly < CH; ly++) {
+        for (let lx = 0; lx < CH; lx++) {
+          const i = ly * CH + lx, f = c.front[i], id = f || c.back[i], d0 = ly * S * N + lx * S;
+          if (id) {
+            const s0 = (f ? 0 : S) * aw + id * S;
+            for (let r = 0; r < S; r++) { const s1 = s0 + r * aw, d1 = d0 + r * N; for (let k = 0; k < S; k++) dst[d1 + k] = px[s1 + k]; }
+          } else if (e.cy * CH + ly >= world.surfaceY(e.cx * CH + lx)) {
+            for (let r = 0; r < S; r++) { const d1 = d0 + r * N; for (let k = 0; k < S; k++) dst[d1 + k] = VOID32; }
+          }
+        }
+      }
+      e.ctx.putImageData(img, 0, 0);
+    }
+
+    function build(cx, cy) {
+      const c = world.getChunk(cx, cy);
+      const e = { cx, cy, empty: isEmpty(c), cv: null, ctx: null };
+      if (!e.empty) {
+        e.cv = mk(S * CH, S * CH);
+        e.ctx = e.cv.getContext("2d");
+        if (fast && e.ctx.createImageData) paintFast(e, c);
+        else for (let ly = 0; ly < CH; ly++) for (let lx = 0; lx < CH; lx++) paint(e, c, lx, ly);
+      }
+      cache.set(key(cx, cy), e);
+      stats.built++;
+      return e;
+    }
+
+    function touch(k, e) { cache.delete(k); cache.set(k, e); }
+
+    // camX/camY: view centre in tiles. vw/vh and tilePx in canvas pixels.
+    function draw(ctx, camX, camY, vw, vh, tilePx) {
+      stats.built = 0; stats.drawn = 0;
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = SKY;
+      ctx.fillRect(0, 0, vw, vh);
+
+      const vis = visibleRange(camX, camY, vw, vh, tilePx, CH, CX, CY, 0);
+      const ring = visibleRange(camX, camY, vw, vh, tilePx, CH, CX, CY, 1);
+      const ox = vw / 2 - camX * tilePx, oy = vh / 2 - camY * tilePx, cpx = CH * tilePx;
+      let budget = buildBudget;
+      const t0 = clock(), mayBuild = () => budget > 0 && (stats.built === 0 || clock() - t0 < buildMs);
+
+      for (let cy = vis.cy0; cy <= vis.cy1; cy++) {
+        for (let cx = vis.cx0; cx <= vis.cx1; cx++) {
+          const k = key(cx, cy);
+          let e = cache.get(k);
+          if (!e && mayBuild()) { e = build(cx, cy); budget--; }
+          if (!e) continue;                              // over budget: appears next frame
+          touch(k, e);
+          if (e.empty) continue;
+          const x0 = Math.round(ox + cx * cpx), x1 = Math.round(ox + (cx + 1) * cpx);   // rounded edges: no seams
+          const y0 = Math.round(oy + cy * cpx), y1 = Math.round(oy + (cy + 1) * cpx);
+          ctx.drawImage(e.cv, 0, 0, S * CH, S * CH, x0, y0, x1 - x0, y1 - y0);
+          stats.drawn++;
+        }
+      }
+      for (let cy = ring.cy0; cy <= ring.cy1; cy++) {    // pre-build / keep the ring around the view
+        for (let cx = ring.cx0; cx <= ring.cx1; cx++) {
+          if (cx >= vis.cx0 && cx <= vis.cx1 && cy >= vis.cy0 && cy <= vis.cy1) continue;
+          const k = key(cx, cy), e = cache.get(k);
+          if (e) touch(k, e);
+          else if (mayBuild()) { build(cx, cy); budget--; }
+        }
+      }
+
+      const ringCount = (ring.cx1 - ring.cx0 + 1) * (ring.cy1 - ring.cy0 + 1);
+      const limit = Math.max(maxChunks, ringCount + 8);  // never evict what we are showing
+      while (cache.size > limit) {
+        const k = cache.keys().next().value, e = cache.get(k);
+        cache.delete(k);
+        world.dropChunk(e.cx, e.cy);
+        stats.evicted++;
+      }
+      stats.cached = cache.size;
+    }
+
+    // call after world.setTile(x, y, ...) succeeds
+    function tileChanged(x, y) {
+      const cx = (x / CH) | 0, cy = (y / CH) | 0, k = key(cx, cy), e = cache.get(k);
+      if (!e) return;                                    // not built yet: it will pick the edit up when it is
+      if (e.empty) { cache.delete(k); return; }          // sky chunk got its first block: rebuild next frame
+      const lx = x % CH, ly = y % CH;
+      e.ctx.clearRect(lx * S, ly * S, S, S);
+      paint(e, world.getChunk(cx, cy), lx, ly);
+    }
+
+    return { draw, tileChanged, stats, cacheSize: () => cache.size, clear: () => cache.clear(), fastPaint: !!fast };
+  }
+
+  return { create, visibleRange, SKY };
+});
+</script>
+<script>
+/* ═══ player.js ═══ */
+// ═══════════════════════════════════════════════════════════════
+//  player.js — player physics against the block world  (step 4)
+//
+//  The player is a 0.9 × 0.9 tile square, so it fits through 1-wide
+//  tunnels. Position (x, y) is the top-left corner, in tiles, y DOWN.
+//  Collision is against the FRONT layer only (the back wall is scenery).
+//
+//  Moves one axis at a time in steps of at most 0.25 tile, so even at
+//  terminal fall speed it cannot skip through a one-block floor.
+//
+//  Plain <script> (global `Player`) or Node.
+//    const pl = Player.create(world);
+//    pl.spawn(5000);                       // drop in above the surface
+//    pl.update(dt, { left, right, jump });
+//    pl.x, pl.y, pl.vx, pl.vy, pl.onGround
+// ═══════════════════════════════════════════════════════════════
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.Player = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const PW = 0.9, PH = 0.9;       // size in tiles
+  const SPD = 6;                  // walk speed, tiles/s
+  const G = 32;                   // gravity, tiles/s²
+  const JUMP = 13.5;              // jump speed -> apex ≈ 2.85 tiles (clears a 2-block step)
+  const MAXFALL = 45;             // terminal velocity, tiles/s
+  const EPS = 1e-6, GAP = 1e-4;   // GAP > EPS: resting contact never counts as overlap
+  const STEP = 0.25;              // max movement per collision step, tiles
+  const SUBSTEP = 1 / 60;         // physics is integrated in slices of at most this
+
+  function create(world) {
+    const pl = { x: 0, y: 0, vx: 0, vy: 0, onGround: false };
+
+    function hits(x, y) {
+      const x0 = Math.floor(x), x1 = Math.floor(x + PW - EPS);
+      const y0 = Math.floor(y), y1 = Math.floor(y + PH - EPS);
+      for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (world.solidAt(tx, ty)) return true;
+      return false;
+    }
+
+    function moveX(d) {
+      while (d !== 0) {
+        const s = Math.abs(d) > STEP ? Math.sign(d) * STEP : d;
+        pl.x += s; d -= s;
+        if (hits(pl.x, pl.y)) {
+          if (pl.onGround) {                               // auto-step: walk up a 1-block ledge without jumping
+            const upY = Math.ceil(pl.y + PH - 1e-9) - 1 - PH - GAP;
+            if (!hits(pl.x, upY)) { pl.y = upY; continue; }
+          }
+          pl.x = s > 0 ? Math.floor(pl.x + PW - EPS) - PW - GAP : Math.floor(pl.x) + 1 + GAP;
+          pl.vx = 0;
+          return;
+        }
+      }
+    }
+    function moveY(d) {
+      while (d !== 0) {
+        const s = Math.abs(d) > STEP ? Math.sign(d) * STEP : d;
+        pl.y += s; d -= s;
+        if (hits(pl.x, pl.y)) {
+          if (s > 0) { pl.y = Math.floor(pl.y + PH - EPS) - PH - GAP; pl.onGround = true; }
+          else pl.y = Math.floor(pl.y) + 1 + GAP;
+          pl.vy = 0;
+          return;
+        }
+      }
+    }
+
+    function step(dt, input) {
+      pl.vx = ((input.right ? 1 : 0) - (input.left ? 1 : 0)) * SPD;
+      if (input.jump && pl.onGround) pl.vy = -JUMP;
+      pl.vy = Math.min(pl.vy + G * dt, MAXFALL);
+      moveX(pl.vx * dt);
+      pl.onGround = false;                                 // re-detected by moveY when we touch the floor
+      moveY(pl.vy * dt);
+      if (pl.y < 0) { pl.y = 0; if (pl.vy < 0) pl.vy = 0; } // top of the world
+    }
+
+    pl.update = function (dt, input) {
+      for (let i = 0; i < 8 && hits(pl.x, pl.y); i++) pl.y -= 0.5;   // a block was placed on us: pop out upward
+      const n = Math.max(1, Math.ceil(dt / SUBSTEP));
+      for (let i = 0; i < n; i++) step(dt / n, input);
+    };
+
+    // drop in just above the surface at column x
+    pl.spawn = function (x) {
+      pl.x = Math.max(0, Math.min(world.W - PW - 0.01, x));
+      const top = Math.min(world.surfaceY(Math.floor(pl.x)), world.surfaceY(Math.floor(pl.x + PW)));
+      pl.y = top - PH - GAP; pl.vx = 0; pl.vy = 0; pl.onGround = false;
+    };
+
+    pl.hits = hits;
+    return pl;
+  }
+
+  return { create, PW, PH, SPD, G, JUMP, MAXFALL };
+});
+</script>
+<script>
+/* ═══ edit.js ═══ */
+// ═══════════════════════════════════════════════════════════════
+//  edit.js — mining and placing rules  (step 5)
+//
+//  Pure game rules, no DOM. The page turns taps into mine()/place()
+//  calls; later the multiplayer layer sends the returned change records
+//  to the server and the server re-uses the same rules.
+//
+//  Every call returns either
+//     { ok: false, reason }                    reasons: invalid, reach, empty,
+//                                                       bedrock, occupied, player, unsupported
+//     { ok: true, x, y, layer, from, to }      the change that was applied
+//
+//  Rules
+//   • Reach: the tile centre must be within REACH tiles of the player centre.
+//   • Mine:  removes the block in the chosen layer (front or back). Bedrock is unbreakable,
+//            and so are the bottom LOCKED_ROWS rows of the world (nothing can be placed there either).
+//   • Place: the chosen layer's tile must be empty and must touch something
+//            (a block or wall in any of the 4 neighbours, or the other layer of the same tile).
+//            A FRONT block cannot be placed where the player is standing; a BACK wall can.
+//   • Any block type may be placed in either layer; the back layer is just drawn darker.
+//
+//  Plain <script> (global `Edit`) or Node.
+// ═══════════════════════════════════════════════════════════════
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./world.js"), require("./player.js"));
+  else root.Edit = factory(root.World, root.Player);
+})(typeof self !== "undefined" ? self : this, function (World, Player) {
+  "use strict";
+
+  const { B, FRONT, BACK } = World;
+  const REACH = 5.5;
+  const LOCKED_ROWS = 4;                                             // the bottom rows (bedrock zone) can never be changed; the server enforces the same
+  const PLACEABLE = [B.DIRT, B.STONE, B.GRASS, B.COAL, B.IRON, B.GOLD];   // hotbar order
+
+  const fail = (reason) => ({ ok: false, reason });
+  const MESSAGES = {
+    invalid: "Can't do that there",
+    reach: "Too far away",
+    empty: "Nothing to mine here",
+    bedrock: "Bedrock can't be changed",
+    occupied: "Already filled",
+    player: "You're standing there",
+    unsupported: "Needs something to attach to",
+  };
+
+  function create({ world, player, renderer }) {
+    const inWorld = (x, y) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < world.W && y >= 0 && y < world.H;
+
+    function distance(x, y) {
+      return Math.hypot(x + 0.5 - (player.x + Player.PW / 2), y + 0.5 - (player.y + Player.PH / 2));
+    }
+    function overlapsPlayer(x, y) {
+      return player.x < x + 1 && player.x + Player.PW > x && player.y < y + 1 && player.y + Player.PH > y;
+    }
+    function filled(x, y) { return world.getTile(x, y, FRONT) !== B.AIR || world.getTile(x, y, BACK) !== B.AIR; }
+    function supported(x, y) { return filled(x, y) || filled(x - 1, y) || filled(x + 1, y) || filled(x, y - 1) || filled(x, y + 1); }
+
+    function apply(x, y, layer, to, from) {
+      world.setTile(x, y, layer, to);
+      if (renderer) renderer.tileChanged(x, y);
+      return { ok: true, x, y, layer, from, to };
+    }
+
+    function mine(x, y, layer) {
+      if (!inWorld(x, y) || (layer !== FRONT && layer !== BACK)) return fail("invalid");
+      if (y >= world.H - LOCKED_ROWS) return fail("bedrock");
+      if (distance(x, y) > REACH) return fail("reach");
+      const id = world.getTile(x, y, layer);
+      if (id === B.AIR) return fail("empty");
+      if (id === B.BEDROCK) return fail("bedrock");
+      return apply(x, y, layer, B.AIR, id);
+    }
+
+    function place(x, y, layer, id) {
+      if (!inWorld(x, y) || (layer !== FRONT && layer !== BACK) || !PLACEABLE.includes(id)) return fail("invalid");
+      if (y >= world.H - LOCKED_ROWS) return fail("bedrock");
+      if (distance(x, y) > REACH) return fail("reach");
+      if (world.getTile(x, y, layer) !== B.AIR) return fail("occupied");
+      if (layer === FRONT && overlapsPlayer(x, y)) return fail("player");
+      if (!supported(x, y)) return fail("unsupported");
+      return apply(x, y, layer, id, B.AIR);
+    }
+
+    return { mine, place, distance, supported };
+  }
+
+  return { create, REACH, LOCKED_ROWS, PLACEABLE, MESSAGES };
+});
+</script>
+<script>
+/* ═══ net.js ═══ */
+// ═══════════════════════════════════════════════════════════════
+//  net.js — game connection to the room server  (step 6)
+//
+//  const net = Net.create({ url, handlers, retryMs?, WebSocketImpl? });
+//  net.start();
+//
+//  handlers (all optional):
+//    init({ id, seed, spawnX, players:{id:{name,x,y}}, edits:[x,y,l,b,…], more })   first message after every (re)connect
+//    edits({ edits, last })     only when the world is big: `more` extra slices of the edit list follow init;
+//                               net.ready (and status "online") wait until the last one has arrived
+//    join({ id, name, x, y })   leave(id)   pos({ id, x, y })   edit({ x, y, l, b })
+//    status("connecting" | "online" | "offline")
+//
+//  net.ready                 true between init and the next disconnect
+//  net.sendPos(x, y)         net.sendEdit(x, y, layer, block)      → true if sent, false if offline
+//  net.heartbeat()           net.close()                            (close = no more reconnects)
+//
+//  Reconnects by itself (1 s, doubling to 8 s). Every reconnect delivers a fresh `init`, so the page
+//  rebuilds the world from the full edit list and cannot drift out of sync.
+//
+//  Plain <script> (global `Net`) or Node.
+// ═══════════════════════════════════════════════════════════════
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.Net = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  function create(opts) {
+    const handlers = opts.handlers || {};
+    const baseRetry = opts.retryMs || 1000;
+    const maxRetry = baseRetry * 8;
+    const WS = opts.WebSocketImpl || (typeof WebSocket !== "undefined" ? WebSocket : null);
+    let ws = null, timer = null, closed = false, attempts = 0, slicesLeft = 0;
+
+    const net = { ready: false, start, send, sendPos, sendEdit, heartbeat, close };
+    const emit = (name, a) => { const f = handlers[name]; if (f) f(a); };
+
+    function start() {
+      if (closed || ws || timer) return;
+      emit("status", "connecting");
+      let sock;
+      try { sock = new WS(opts.url); } catch (_) { return retry(); }
+      ws = sock;
+      sock.onmessage = (ev) => { if (ws === sock) onMessage(ev.data); };      // ignore stale sockets
+      sock.onclose = () => { if (ws === sock) lost(); };
+      sock.onerror = () => {};                                                  // a close always follows
+    }
+
+    function onMessage(raw) {
+      let m;
+      try { m = JSON.parse(raw); } catch (_) { return; }
+      if (!m || typeof m !== "object") return;
+      switch (m.t) {
+        case "init":
+          attempts = 0; slicesLeft = m.more > 0 ? m.more | 0 : 0;
+          net.ready = slicesLeft === 0;                                          // not ready until the whole world has arrived
+          emit("init", { id: m.id, seed: m.seed, spawnX: m.spawnX, players: m.players || {}, edits: m.edits || [], more: slicesLeft });
+          if (net.ready) emit("status", "online");
+          break;
+        case "eb":
+          if (slicesLeft <= 0) break;
+          slicesLeft--;
+          if (slicesLeft === 0) net.ready = true;
+          emit("edits", { edits: m.edits || [], last: slicesLeft === 0 });
+          if (slicesLeft === 0) emit("status", "online");
+          break;
+        case "+": emit("join", { id: m.id, name: m.name, x: m.x, y: m.y }); break;
+        case "-": emit("leave", m.id); break;
+        case "p": emit("pos", { id: m.id, x: m.x, y: m.y }); break;
+        case "e": emit("edit", { x: m.x, y: m.y, l: m.l, b: m.b }); break;
+      }
+    }
+
+    function lost() {
+      ws = null;
+      const wasReady = net.ready;
+      net.ready = false; slicesLeft = 0;
+      if (closed) return;
+      emit("status", "offline");
+      retry();
+      return wasReady;
+    }
+
+    function retry() {
+      if (closed || timer) return;
+      const wait = Math.min(maxRetry, baseRetry * Math.pow(2, attempts++));
+      timer = setTimeout(() => { timer = null; start(); }, wait);
+    }
+
+    function send(obj) {
+      if (!net.ready || !ws || ws.readyState !== 1) return false;
+      try { ws.send(JSON.stringify(obj)); return true; } catch (_) { return false; }
+    }
+    function sendPos(x, y) { return send({ t: "p", x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }); }
+    function sendEdit(x, y, l, b) { return send({ t: "e", x, y, l, b }); }
+    function heartbeat() { return send({ t: "hb" }); }
+
+    function close() {
+      closed = true; net.ready = false;
+      if (timer) { clearTimeout(timer); timer = null; }
+      const s = ws; ws = null;
+      if (s) { try { s.close(); } catch (_) {} }
+    }
+
+    return net;
+  }
+
+  return { create };
+});
+</script>
 <script>
 "use strict";
 const CFG = window.APP_CONFIG || {};
 const LK = window.LivekitClient;
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const q = new URLSearchParams(location.search);
+const USE_WEBAUDIO = q.get("webaudio") !== "0";          // ?webaudio=0 switches back to plain <audio> volume (for comparing on iOS)
 
-const WORLD_W = 200;          // must match worker.js
-const HEAR = 16;              // voice range in metres
-const SPD = 6, G = 30, JUMP = 11;
+// voice: full volume inside NEAR tiles, silent beyond FAR tiles
+const NEAR = 3, FAR = 22;
+const volumeFor = (d) => clamp((FAR - d) / (FAR - NEAR), 0, 1);
 
 // ── state ───────────────────────────────────────────────────────
 let lkRoom = null, localTrack = null, muted = false;
-let ws = null, wsUrl = "", active = false, retryTimer = 0;
-let myId = "", myName = "";
-const me = { x: 100, y: -1, vy: 0 };
-const remotes = new Map();    // id -> { name, x, y, tx, ty }
+let net = null, roomName = "", myId = "", myName = "";
+let world = null, R = null, pl = null, Ed = null;            // created when the first init arrives
+let running = false, rafId = 0, lastSpawned = false;
+const atlas = Textures.build();
+const remotes = new Map();                                    // id -> { name, x, y, dx, dy }  (dx,dy = smoothed draw position)
+const pending = new Map();                                    // my edits the server hasn't echoed yet: key -> { x, y, l, from, t }
 const input = { left: false, right: false, jump: false };
+const timers = [];
+
+const canvas = $("c"), ctx = canvas.getContext("2d", { alpha: false });
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+function resize() { canvas.width = Math.round(innerWidth * dpr); canvas.height = Math.round(innerHeight * dpr); }
+addEventListener("resize", resize); resize();
 
 function setStatus(msg, err) { $("status").textContent = msg || ""; $("status").className = err ? "err" : ""; }
 function hue(str) { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+let toastT = 0;
+function toast(msg, ms) { const t = $("toast"); t.textContent = msg; t.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => { t.style.opacity = 0; }, ms || 1500); }
 
-// ── join / leave (LiveKit voice) ────────────────────────────────
+// ── join screen ─────────────────────────────────────────────────
+try { $("in-name").value = localStorage.getItem("sq-name") || ""; $("in-room").value = localStorage.getItem("sq-room") || ""; } catch (_) {}
+if (q.get("room")) $("in-room").value = q.get("room");
+$("btn-join").onclick = join;
+for (const id of ["in-room", "in-name"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") join(); });
+
 async function join() {
-  const roomName = $("in-room").value.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
+  const room = $("in-room").value.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
   const name = $("in-name").value.trim().slice(0, 32);
-  if (!roomName) return setStatus("Enter a room name.", true);
+  if (!room) return setStatus("Enter a room name.", true);
   if (!name) return setStatus("Enter your name.", true);
-  if (!CFG.WORKER_URL || !CFG.LIVEKIT_URL || CFG.WORKER_URL.includes("YOUR-"))
-    return setStatus("Fill in config.js first.", true);
-  if (!LK) return setStatus("Voice SDK failed to load. Reload.", true);
+  if (!CFG.WORKER_URL || !CFG.LIVEKIT_URL || CFG.WORKER_URL.includes("YOUR-")) return setStatus("Fill in config.js first.", true);
+  try { localStorage.setItem("sq-name", name); localStorage.setItem("sq-room", room); } catch (_) {}
 
   $("btn-join").disabled = true;
   try {
     setStatus("Connecting…");
-    const res = await fetch(CFG.WORKER_URL + "/token?room=" + encodeURIComponent(roomName) +
-                            "&name=" + encodeURIComponent(name));
+    const res = await fetch(CFG.WORKER_URL + "/token?room=" + encodeURIComponent(room) + "&name=" + encodeURIComponent(name));
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Token error " + res.status);
 
-    const r = new LK.Room();
-    lkRoom = r;
-    r.on(LK.RoomEvent.TrackSubscribed, (track, pub, p) => {
-      if (track.kind !== LK.Track.Kind.Audio) return;
-      const a = track.attach();
-      a.dataset.identity = p.identity;
-      $("audio-out").appendChild(a);
-    });
-    r.on(LK.RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((n) => n.remove()));
-    r.on(LK.RoomEvent.Disconnected, () => { if (lkRoom === r) { lkRoom = null; leave("Disconnected."); } });
+    let myIdent = null, micNote = "";
+    if (LK) {                                                  // voice is a bonus: if it fails the game still starts
+      try {
+        const r = new LK.Room({ webAudioMix: USE_WEBAUDIO });
+        lkRoom = r;
+        r.on(LK.RoomEvent.TrackSubscribed, (track, pub, p) => {
+          if (track.kind !== LK.Track.Kind.Audio) return;
+          const a = track.attach();
+          a.dataset.identity = p.identity;
+          $("audio-out").appendChild(a);
+        });
+        r.on(LK.RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((n) => n.remove()));
+        r.on(LK.RoomEvent.Disconnected, () => { if (lkRoom === r) { lkRoom = null; toast("Voice disconnected", 3000); } });
+        await r.connect(CFG.LIVEKIT_URL, data.token);
+        myIdent = r.localParticipant.identity;
+        try {
+          localTrack = await LK.createLocalAudioTrack({ echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+          await r.localParticipant.publishTrack(localTrack);
+        } catch (e) { muted = true; micNote = "Mic unavailable: you can still hear others."; }
+        if (r.startAudio) { try { await r.startAudio(); } catch (_) {} }
+      } catch (e) {
+        if (lkRoom) { try { lkRoom.disconnect(); } catch (_) {} lkRoom = null; }
+        micNote = "Voice failed to connect (" + (e.message || e) + ").";
+      }
+    } else micNote = "Voice SDK failed to load.";
 
-    await r.connect(CFG.LIVEKIT_URL, data.token);
-    localTrack = await LK.createLocalAudioTrack({ echoCancellation: true, noiseSuppression: true, autoGainControl: true });
-    await r.localParticipant.publishTrack(localTrack);
-    if (r.startAudio) await r.startAudio();
-
-    myId = r.localParticipant.identity;   // same id for voice + game
-    myName = name;
-    muted = false; updateMute();
-    $("join").classList.add("hidden");
-    $("room").classList.remove("hidden");
+    myId = myIdent || (name.toLowerCase().replace(/[^a-z0-9_-]/g, "") || "user") + "-" + Math.random().toString(36).slice(2, 8);
+    myName = name; roomName = room;
+    $("join").classList.add("hidden"); $("game").classList.remove("hidden");
+    updateMute();
+    startGame();
+    if (micNote) toast(micNote, 4000);
     setStatus("");
-    startGame(roomName);
   } catch (e) {
     if (lkRoom) { try { lkRoom.disconnect(); } catch (_) {} lkRoom = null; }
     setStatus(e.message || String(e), true);
-  } finally {
-    $("btn-join").disabled = false;
-  }
+  } finally { $("btn-join").disabled = false; }
 }
 
 function leave(msg) {
+  running = false; cancelAnimationFrame(rafId);
+  timers.splice(0).forEach(clearInterval);
+  if (net) { net.close(); net = null; }
   const r = lkRoom; lkRoom = null;
   if (r) { try { r.disconnect(); } catch (_) {} }
   if (localTrack) { try { localTrack.stop(); } catch (_) {} localTrack = null; }
-  stopGame();
   $("audio-out").innerHTML = "";
-  $("room").classList.add("hidden");
-  $("join").classList.remove("hidden");
+  world = R = pl = Ed = null; lastSpawned = false;
+  remotes.clear(); pending.clear();
+  input.left = input.right = input.jump = false; aim.down = false;
+  window.__world = window.__pl = null;
+  $("game").classList.add("hidden"); $("join").classList.remove("hidden");
   setStatus(msg || "");
 }
+$("bleave").onclick = () => leave("");
 
+// ── mute / invite ───────────────────────────────────────────────
 async function toggleMute() {
-  if (!lkRoom) return;
-  muted = !muted;
-  try { await lkRoom.localParticipant.setMicrophoneEnabled(!muted); }
-  catch (_) { muted = !muted; }
+  if (!lkRoom) return toast("Voice isn't connected");
+  const was = muted; muted = !muted;
+  try { await lkRoom.localParticipant.setMicrophoneEnabled(!muted); } catch (_) { muted = was; toast("Mic unavailable"); }
   updateMute();
 }
-function updateMute() {
-  $("btn-mute").classList.toggle("muted", muted);
-  $("btn-mute").textContent = muted ? "🔇" : "🎤";
+function updateMute() { $("bmute").classList.toggle("muted", muted); $("bmute").textContent = muted ? "🔇" : "🎤"; }
+$("bmute").onclick = toggleMute;
+$("binvite").onclick = async () => {
+  const link = location.origin + location.pathname + "?room=" + encodeURIComponent(roomName);
+  try { await navigator.clipboard.writeText(link); toast("Invite link copied"); }
+  catch (_) { if (navigator.share) { try { await navigator.share({ url: link }); } catch (_) {} } else toast(link, 5000); }
+};
+addEventListener("pointerdown", () => { if (lkRoom && lkRoom.startAudio && lkRoom.canPlaybackAudio === false) lkRoom.startAudio().catch(() => {}); }, { passive: true });
+
+// ── game start: connect, then wait for the server's init ────────
+function startGame() {
+  remotes.clear(); pending.clear(); lastSpawned = false;
+  net = Net.create({
+    url: CFG.WORKER_URL.replace(/^http/, "ws") + "/ws?room=" + encodeURIComponent(roomName) + "&name=" + encodeURIComponent(myName) + "&id=" + encodeURIComponent(myId),
+    handlers: { init: onInit, edits: onEditSlice, join: onJoin, leave: (id) => remotes.delete(id), pos: onPos, edit: onRemoteEdit, status: onStatus },
+  });
+  window.__net = net;
+  net.start();
+  running = true; last = 0;
+  rafId = requestAnimationFrame(frame);
+  timers.push(setInterval(() => { if (net) net.heartbeat(); }, 5000));
+  timers.push(setInterval(sendPos, 100));                         // 10 updates/s is plenty with smoothing, and keeps server message counts low
+  timers.push(setInterval(updateVoice, 120));
+  timers.push(setInterval(expirePending, 500));
+  onStatus("connecting");
 }
 
-// ── game connection ─────────────────────────────────────────────
-function startGame(roomName) {
-  active = true;
+function onStatus(s) {
+  const el = $("conn");
+  if (s === "online") el.classList.add("hidden");
+  else { el.textContent = world ? "Reconnecting…" : "Connecting…"; el.classList.remove("hidden"); }
+}
+
+function onInit(m) {
+  if (!world) {                                                // first time: build the world from the seed
+    world = World.create(m.seed);
+    R = Renderer.create({ world, atlas });
+    pl = Player.create(world);
+    Ed = Edit.create({ world, player: pl, renderer: R });
+    window.__world = world; window.__pl = pl; window.__ed = Ed; window.__R = R;
+    pl.spawn(m.spawnX); camX = pl.x + 0.45; camY = pl.y + 0.45;
+    refreshUI();
+    toast("Tap blocks to mine. Pick a block below to build.", 3000);
+  } else { world.reset(); R.clear(); }                          // reconnect: rebuild from the full edit list so nothing can drift
+  world.loadEdits(m.edits);
+  lastSent.t = 0;                                               // tell the room where we are right away
+  pending.clear();
   remotes.clear();
-  wsUrl = CFG.WORKER_URL.replace(/^http/, "ws") + "/ws?room=" + encodeURIComponent(roomName) +
-          "&name=" + encodeURIComponent(myName) + "&id=" + encodeURIComponent(myId);
-  $("info").textContent = roomName;
-  connectWs();
-  lastTs = 0;
-  requestAnimationFrame(loop);
+  for (const id in m.players) if (id !== myId) onJoin({ id, ...m.players[id] });
+  if (m.more > 0) { const el = $("conn"); el.textContent = "Loading world…"; el.classList.remove("hidden"); }   // a big, much-edited world arrives in slices
 }
-function stopGame() {
-  active = false;
-  clearTimeout(retryTimer); retryTimer = 0;
-  if (ws) { try { ws.close(); } catch (_) {} ws = null; }
-  remotes.clear();
-  input.left = input.right = input.jump = false;
+function onEditSlice(m) {
+  if (!world) return;
+  world.loadEdits(m.edits);
+  if (m.last) R.clear();                                        // chunks drawn while slices were still arriving get redrawn
 }
-function connectWs() {
-  const sock = new WebSocket(wsUrl);
-  ws = sock;
-  sock.onmessage = (ev) => {
-    if (ws !== sock) return;
-    let m; try { m = JSON.parse(ev.data); } catch (_) { return; }
-    if (m.t === "init") {
-      remotes.clear();
-      for (const id in m.players) {
-        const p = m.players[id];
-        if (id === myId) { me.x = p.x; me.y = p.y; me.vy = 0; continue; }
-        remotes.set(id, { name: p.name, x: p.x, y: p.y, tx: p.x, ty: p.y });
-      }
-    } else if (m.t === "+") {
-      remotes.set(m.id, { name: m.name, x: m.x, y: m.y, tx: m.x, ty: m.y });
-    } else if (m.t === "-") {
-      remotes.delete(m.id);
-    } else if (m.t === "p") {
-      const r = remotes.get(m.id);
-      if (r) { r.tx = m.x; r.ty = m.y; }
-    }
-    $("info").textContent = $("info").textContent.split(" · ")[0] + " · " + (1 + remotes.size) + " here";
-  };
-  sock.onclose = () => {
-    if (active && ws === sock) retryTimer = setTimeout(() => { if (active) connectWs(); }, 2000);
-  };
-  sock.onerror = () => { try { sock.close(); } catch (_) {} };
+function onJoin(m) {
+  if (m.id === myId) return;
+  const ok = m.y !== null && m.y !== undefined;
+  remotes.set(m.id, { name: m.name, x: m.x, y: ok ? m.y : null, dx: m.x, dy: ok ? m.y : null });
 }
-
-// ── game loop ───────────────────────────────────────────────────
-const canvas = $("c"), ctx = canvas.getContext("2d");
-let lastTs = 0, lastSend = 0, lastHb = 0, sentX = -1, sentY = -1;
-
-function loop(ts) {
-  if (!active) return;
-  requestAnimationFrame(loop);
-  if (!lastTs) lastTs = ts;
-  const dt = Math.min((ts - lastTs) / 1000, 0.05);
-  lastTs = ts;
-  step(dt);
-  render();
-  proximity();
+function onPos(m) {
+  const r = remotes.get(m.id); if (!r) return;
+  if (r.y === null) { r.dx = m.x; r.dy = m.y; }
+  r.x = m.x; r.y = m.y;
 }
-
-function step(dt) {
-  const vx = ((input.right ? 1 : 0) - (input.left ? 1 : 0)) * SPD;
-  me.x = clamp(me.x + vx * dt, 0, WORLD_W - 1);
-  if (input.jump && me.y >= -1) me.vy = -JUMP;
-  me.vy += G * dt;
-  me.y += me.vy * dt;
-  if (me.y >= -1) { me.y = -1; me.vy = 0; }   // flat ground at y = 0, square is 1 m tall
-
-  const k = Math.min(1, dt * 14);
-  for (const r of remotes.values()) { r.x += (r.tx - r.x) * k; r.y += (r.ty - r.y) * k; }
-
+function onRemoteEdit(m) {                                      // every accepted edit comes back here, mine included
+  if (!world) return;
+  pending.delete((m.y * World.W + m.x) * 2 + m.l);
+  if (world.getTile(m.x, m.y, m.l) !== m.b) { world.setTile(m.x, m.y, m.l, m.b); R.tileChanged(m.x, m.y); }
+}
+function expirePending() {                                      // the server silently refuses some edits; undo those after 3 s
   const now = performance.now();
-  if (ws && ws.readyState === 1) {
-    if (now - lastSend > 70) {
-      const x = Math.round(me.x * 100) / 100, y = Math.round(me.y * 100) / 100;
-      if (x !== sentX || y !== sentY) {
-        ws.send(JSON.stringify({ t: "p", x, y }));
-        sentX = x; sentY = y; lastSend = now;
-      }
-    }
-    if (now - lastHb > 5000) { ws.send(JSON.stringify({ t: "hb" })); lastHb = now; }
+  for (const [k, p] of pending) {
+    if (now - p.t < 3000) continue;
+    pending.delete(k);
+    if (world) { world.setTile(p.x, p.y, p.l, p.from); R.tileChanged(p.x, p.y); }
   }
 }
 
-function render() {
-  const dpr = window.devicePixelRatio || 1;
-  const cw = window.innerWidth, ch = window.innerHeight;
-  if (canvas.width !== ((cw * dpr) | 0) || canvas.height !== ((ch * dpr) | 0)) {
-    canvas.width = (cw * dpr) | 0; canvas.height = (ch * dpr) | 0;
-  }
-  const pxm = clamp(cw / 22, 18, 48);          // pixels per metre
-  const viewW = cw / pxm;
-  const camX = clamp(me.x + 0.5 - viewW / 2, 0, WORLD_W - viewW);
-  const groundY = ch * 0.7;                    // screen y of the ground line
-
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = "#24305c"; ctx.fillRect(0, 0, cw, ch);                   // sky
-  ctx.fillStyle = "#3b7a34"; ctx.fillRect(0, groundY, cw, ch - groundY);   // ground
-
-  ctx.setTransform(dpr * pxm, 0, 0, dpr * pxm, -camX * dpr * pxm, groundY * dpr);
-  ctx.fillStyle = "#2b5a26"; ctx.fillRect(0, 0, WORLD_W, 0.25);            // grass edge
-  ctx.fillStyle = "#c33"; ctx.fillRect(-0.3, -2, 0.3, 2);                  // left wall marker
-  ctx.fillRect(WORLD_W, -2, 0.3, 2);                                       // right wall marker
-
-  for (const r of remotes.values()) drawSquare(r.x, r.y, r.name);
-  drawSquare(me.x, me.y, myName);
+let lastSent = { x: -1, y: -1, t: 0 };
+function sendPos() {
+  if (!net || !net.ready || !pl) return;
+  const now = performance.now();
+  if (Math.abs(pl.x - lastSent.x) < 0.01 && Math.abs(pl.y - lastSent.y) < 0.01 && now - lastSent.t < 1000) return;
+  if (net.sendPos(pl.x, pl.y)) lastSent = { x: pl.x, y: pl.y, t: now };
 }
 
-function drawSquare(x, y, name) {
-  ctx.fillStyle = "hsl(" + hue(name || "?") + " 72% 62%)";
-  ctx.fillRect(x, y, 1, 1);
-  ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 0.06;
-  ctx.strokeRect(x, y, 1, 1);
-  ctx.font = "600 0.4px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#fff";
-  ctx.fillText(name || "", x + 0.5, y - 0.2);
-}
-
-// proximity voice: full volume up close, silent at HEAR metres
-function proximity() {
-  const kids = $("audio-out").children;
-  for (let i = 0; i < kids.length; i++) {
-    const r = remotes.get(kids[i].dataset.identity);
-    kids[i].volume = r ? clamp(1 - Math.hypot(r.x - me.x, r.y - me.y) / HEAR, 0, 1) : 1;
+// ── proximity voice ─────────────────────────────────────────────
+window.__volumes = {};
+function updateVoice() {
+  if (!lkRoom || !pl) return;
+  const parts = lkRoom.remoteParticipants || lkRoom.participants;      // Map in v2 (older builds: participants)
+  if (!parts) return;
+  for (const p of parts.values()) {
+    const r = remotes.get(p.identity);
+    const d = r && r.y !== null ? Math.hypot(r.dx - pl.x, r.dy - pl.y) : Infinity;
+    const v = volumeFor(d);
+    window.__volumes[p.identity] = v;
+    try { if (p.setVolume) p.setVolume(v); } catch (_) {}
+    if (!USE_WEBAUDIO) for (const a of $("audio-out").children) if (a.dataset.identity === p.identity) a.volume = v;
   }
 }
 
-// ── input ───────────────────────────────────────────────────────
+// ── camera / zoom ───────────────────────────────────────────────
+const ZOOMS = [12, 16, 24, 32, 48];
+let zi = ZOOMS.findIndex((z) => z >= innerWidth / 22); if (zi < 0) zi = 2;
+const zoomPx = () => ZOOMS[zi] * dpr;
+$("zi").onclick = () => { zi = Math.min(ZOOMS.length - 1, zi + 1); };
+$("zo").onclick = () => { zi = Math.max(0, zi - 1); };
+let camX = 0, camY = 0;
+$("resp").onclick = () => { if (pl) { pl.spawn(Math.floor(pl.x)); camX = pl.x + 0.45; camY = pl.y + 0.45; sendPos(); } };   // lift yourself out of a pit
+
+// ── build state: what a tap does ────────────────────────────────
+let mode = "mine", layer = World.FRONT, slot = 0;
+const PLACE = Edit.PLACEABLE;
+function refreshUI() {
+  const bm = $("bmode"); bm.textContent = mode === "mine" ? "⛏ Mine" : "▦ Place"; bm.className = "small " + mode;
+  const bl = $("blayer"); bl.textContent = layer === World.FRONT ? "Front" : "Back"; bl.className = "small" + (layer === World.BACK ? " back" : "");
+  [...$("hotbar").children].forEach((el, i) => el.classList.toggle("sel", i === slot && mode === "place"));
+}
+PLACE.forEach((id, i) => {
+  const el = document.createElement("div"); el.className = "slot";
+  const c = document.createElement("canvas"); c.width = 16; c.height = 16;
+  c.getContext("2d").drawImage(atlas.canvas, id * atlas.S, 0, atlas.S, atlas.S, 0, 0, 16, 16);
+  const n = document.createElement("i"); n.textContent = i + 1;
+  el.appendChild(c); el.appendChild(n);
+  el.addEventListener("pointerdown", (e) => { e.preventDefault(); slot = i; mode = "place"; refreshUI(); });
+  $("hotbar").appendChild(el);
+});
+$("bmode").onclick = () => { mode = mode === "mine" ? "place" : "mine"; refreshUI(); };
+$("blayer").onclick = () => { layer = layer === World.FRONT ? World.BACK : World.FRONT; refreshUI(); };
+refreshUI();
+
+// ── aiming: tap / hold / drag on the world ──────────────────────
+const aim = { down: false, hover: false, id: null, cx: 0, cy: 0, button: 0, cool: 0 };
+function aimTile() {
+  const z = zoomPx();
+  return [Math.floor(camX + (aim.cx * dpr - canvas.width / 2) / z), Math.floor(camY + (aim.cy * dpr - canvas.height / 2) / z)];
+}
+let offlineToastAt = 0;
+function act(announce) {
+  if (!world) return;
+  if (!net || !net.ready) {                                     // never edit while disconnected: the world would drift apart
+    const now = performance.now();
+    if (announce && now - offlineToastAt > 1500) { offlineToastAt = now; toast("Reconnecting… can't edit yet"); }
+    return;
+  }
+  const [tx, ty] = aimTile();
+  const placing = mode === "place" || aim.button === 2;
+  const r = placing ? Ed.place(tx, ty, layer, PLACE[slot]) : Ed.mine(tx, ty, layer);
+  if (!r.ok) {
+    if (announce) toast(Edit.MESSAGES[r.reason] + (r.reason === "empty" && layer === World.FRONT ? " (try Back)" : ""));
+    return;
+  }
+  const key = (r.y * World.W + r.x) * 2 + r.layer;
+  if (!pending.has(key)) pending.set(key, { x: r.x, y: r.y, l: r.layer, from: r.from, t: performance.now() });
+  else pending.get(key).t = performance.now();
+  net.sendEdit(r.x, r.y, r.layer, r.to);                        // applied locally already; the server's echo makes it official
+}
+canvas.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  Object.assign(aim, { down: true, id: e.pointerId, cx: e.clientX, cy: e.clientY, button: e.button, cool: 0.3 });
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  act(true);
+});
+canvas.addEventListener("pointermove", (e) => { aim.cx = e.clientX; aim.cy = e.clientY; aim.hover = e.pointerType === "mouse"; });
+const release = (e) => { if (e.pointerId === aim.id) aim.down = false; };
+canvas.addEventListener("pointerup", release); canvas.addEventListener("pointercancel", release);
+canvas.addEventListener("pointerleave", () => { aim.hover = false; });
+
+// ── movement input: on-screen buttons + keyboard ────────────────
 function bindPad(btn, key) {
-  const down = (e) => { e.preventDefault(); input[key] = true; btn.classList.add("held"); };
+  const down = (e) => { e.preventDefault(); input[key] = true; btn.classList.add("held"); try { btn.setPointerCapture(e.pointerId); } catch (_) {} };
   const up = () => { input[key] = false; btn.classList.remove("held"); };
   btn.addEventListener("pointerdown", down);
-  btn.addEventListener("pointerup", up);
-  btn.addEventListener("pointercancel", up);
-  btn.addEventListener("pointerleave", up);
-  btn.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false }); // no long-press buzz
+  btn.addEventListener("pointerup", up); btn.addEventListener("pointercancel", up); btn.addEventListener("lostpointercapture", up);
+  btn.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
 }
-bindPad($("bl"), "left");
-bindPad($("br"), "right");
-bindPad($("bj"), "jump");
-
-const KEYS = { ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right",
-               ArrowUp: "jump", w: "jump", W: "jump", " ": "jump" };
-window.addEventListener("keydown", (e) => { if (active && KEYS[e.key]) { input[KEYS[e.key]] = true; e.preventDefault(); } });
-window.addEventListener("keyup", (e) => { if (KEYS[e.key]) input[KEYS[e.key]] = false; });
-window.addEventListener("blur", () => { input.left = input.right = input.jump = false; });
-document.addEventListener("contextmenu", (e) => { if (!e.target.closest("input")) e.preventDefault(); });
-window.addEventListener("pagehide", () => { try { if (ws) ws.close(); } catch (_) {} });
-
-// ── wiring ──────────────────────────────────────────────────────
-$("btn-join").addEventListener("click", () => {
-  localStorage.setItem("sq-name", $("in-name").value.trim().slice(0, 32));
-  join();
+bindPad($("bl"), "left"); bindPad($("br"), "right"); bindPad($("bj"), "jump");
+const KEYS = { arrowleft: "left", a: "left", arrowright: "right", d: "right", arrowup: "jump", w: "jump", " ": "jump" };
+addEventListener("keydown", (e) => {
+  if (!world || e.target.tagName === "INPUT") return;
+  const k = e.key.toLowerCase();
+  if (KEYS[k]) { input[KEYS[k]] = true; e.preventDefault(); }
+  else if (k >= "1" && k <= String(PLACE.length)) { slot = +k - 1; mode = "place"; refreshUI(); }
+  else if (k === "q") $("bmode").click();
+  else if (k === "e") $("blayer").click();
+  else if (k === "m") toggleMute();
 });
-$("btn-leave").addEventListener("click", () => leave(""));
-$("btn-mute").addEventListener("click", toggleMute);
-$("in-room").addEventListener("input", (e) => { e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""); });
-[$("in-room"), $("in-name")].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-join").click(); }));
+addEventListener("keyup", (e) => { const k = KEYS[e.key.toLowerCase()]; if (k) input[k] = false; });
+addEventListener("blur", () => { input.left = input.right = input.jump = false; aim.down = false; });
+document.addEventListener("contextmenu", (e) => e.preventDefault());
 
-const q = new URLSearchParams(location.search);
-if (q.get("room")) $("in-room").value = q.get("room").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
-$("in-name").value = localStorage.getItem("sq-name") || "";
+// hooks for automated tests
+window.__tileToClient = (tx, ty) => { const z = zoomPx(); return [(canvas.width / 2 + (tx + 0.5 - camX) * z) / dpr, (canvas.height / 2 + (ty + 0.5 - camY) * z) / dpr]; };
+window.__remotes = remotes; window.__pending = pending;
+
+// ── loop ────────────────────────────────────────────────────────
+let last = 0, frames = 0, fpsT = performance.now(), fps = 0, worst = 0;
+function frame(t) {
+  if (!running) return;
+  rafId = requestAnimationFrame(frame);
+  const dt = last ? Math.min((t - last) / 1000, 0.05) : 1 / 60;
+  if (last && frames > 5) worst = Math.max(worst, t - last);
+  last = t;
+  const vw = canvas.width, vh = canvas.height;
+  if (!world) { ctx.fillStyle = "#6aa7ff"; ctx.fillRect(0, 0, vw, vh); return; }       // still waiting for the server
+
+  pl.update(dt, input);
+  const z = zoomPx();
+  const cx = pl.x + Player.PW / 2, cy = pl.y + Player.PH / 2, k = 1 - Math.exp(-9 * dt);
+  camX += (cx - camX) * k; camY += (cy - camY) * k;
+  const hw = vw / z / 2, hh = vh / z / 2;
+  camX = Math.min(Math.max(camX, hw), Math.max(hw, World.W - hw));
+  camY = Math.min(Math.max(camY, hh), Math.max(hh, World.H - hh));
+
+  if (aim.down) { aim.cool -= dt; if (aim.cool <= 0) { act(false); aim.cool = 0.12; } }
+
+  R.draw(ctx, camX, camY, vw, vh, z);
+
+  // other players: glide toward the last position the server told us
+  const s = Math.round(Player.PW * z), lw = Math.max(2, z / 12), sm = 1 - Math.exp(-10 * dt);
+  ctx.font = `600 ${Math.max(10, Math.round(z * 0.36))}px system-ui, sans-serif`; ctx.textAlign = "center";
+  for (const [id, r] of remotes) {
+    if (r.y === null) continue;
+    r.dx += (r.x - r.dx) * sm; r.dy += (r.y - r.dy) * sm;
+    const sx = Math.round(vw / 2 + (r.dx - camX) * z), sy = Math.round(vh / 2 + (r.dy - camY) * z);
+    if (sx < -200 || sy < -200 || sx > vw + 200 || sy > vh + 200) continue;
+    ctx.fillStyle = `hsl(${hue(id)},70%,55%)`; ctx.fillRect(sx, sy, s, s);
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = lw; ctx.strokeRect(sx + lw / 2, sy + lw / 2, s - lw, s - lw);
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.strokeText(r.name, sx + s / 2, sy - 6);
+    ctx.fillStyle = "#fff"; ctx.fillText(r.name, sx + s / 2, sy - 6);
+  }
+
+  const sx = Math.round(vw / 2 + (pl.x - camX) * z), sy = Math.round(vh / 2 + (pl.y - camY) * z);
+  ctx.fillStyle = "#ff5a7a"; ctx.fillRect(sx, sy, s, s);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = lw; ctx.strokeRect(sx + lw / 2, sy + lw / 2, s - lw, s - lw);
+
+  if (aim.down || aim.hover) {
+    const [tx, ty] = aimTile();
+    const ox = Math.round(vw / 2 + (tx - camX) * z), oy = Math.round(vh / 2 + (ty - camY) * z), ts = Math.round(z);
+    ctx.strokeStyle = Ed.distance(tx, ty) <= Edit.REACH ? "#ffffff" : "#ff4d4d";
+    ctx.lineWidth = Math.max(2, z / 14);
+    ctx.strokeRect(ox + 1, oy + 1, ts - 2, ts - 2);
+  }
+
+  frames++;
+  if (t - fpsT > 500) {
+    fps = Math.round(frames * 1000 / (t - fpsT)); frames = 0; fpsT = t;
+    $("hud").textContent = `${roomName} · ${remotes.size + 1} here · ${fps} fps\nx ${pl.x.toFixed(1)}  y ${pl.y.toFixed(1)}  depth ${(pl.y - world.surfaceY(pl.x)).toFixed(0)}\n${mode} · ${layer === World.FRONT ? "front" : "back"} · ${World.NAMES[PLACE[slot]]}`;
+  }
+}
 </script>
 </body>
 </html>
