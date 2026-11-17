@@ -32,24 +32,19 @@
   #toast { position: fixed; top: 108px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 7px 14px; border-radius: 999px;
            font: 600 13px system-ui, sans-serif; color: #fff; background: rgba(11,15,29,.8); opacity: 0; transition: opacity .25s; pointer-events: none; white-space: nowrap; }
   #conn { position: fixed; top: 60px; left: 8px; z-index: 3; padding: 6px 10px; border-radius: 8px; font: 700 12px system-ui; color: #fff; background: #b5563a; pointer-events: none; }
-  #hotbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(112px + env(safe-area-inset-bottom)); z-index: 2;
-            display: flex; gap: 6px; padding: 6px; border-radius: 12px; background: rgba(11,15,29,.55); }
+  #hotbar { position: fixed; right: 8px; bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 2;
+            display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; padding: 6px; border-radius: 12px; background: rgba(11,15,29,.55); }
+  #sab { position: fixed; left: 0; bottom: 0; width: 0; height: env(safe-area-inset-bottom); pointer-events: none; visibility: hidden; }
   .slot { position: relative; width: 44px; height: 44px; border-radius: 8px; border: 2px solid rgba(255,255,255,.2); background: rgba(20,26,46,.7); padding: 3px; touch-action: manipulation; }
   .slot canvas { position: static; width: 100%; height: 100%; image-rendering: pixelated; touch-action: manipulation; }
   .slot i { position: absolute; left: 3px; top: 0; font: 700 10px system-ui; color: #fff; font-style: normal; text-shadow: 0 0 3px #000; }
   .slot.sel { border-color: #fff; background: rgba(79,107,255,.55); }
-  #bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; justify-content: space-between;
-            align-items: flex-end; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); pointer-events: none; }
-  #bottom > * { pointer-events: auto; }
-  .pad { display: flex; gap: 10px; }
   #game button { font: 600 14px system-ui, sans-serif; color: #e9edfb; border: 1px solid rgba(255,255,255,.2); touch-action: none; cursor: pointer; background: rgba(20,26,46,.66); }
   .small { border-radius: 8px; padding: 9px 12px; touch-action: manipulation; }
-  .pbtn { width: 72px; height: 72px; border-radius: 50%; font-size: 24px; }
-  #bj { width: 88px; height: 88px; font-size: 14px; }
-  .pbtn.held { background: rgba(108,140,255,.75); }
   #bmode.place { background: #2f8f5b; } #bmode.mine { background: #b5563a; }
   #blayer.back { background: #4a3b86; }
   #bmute.muted { background: #b5313a; }
+  #bghost.on { background: #3d6bd6; }
 </style>
 </head>
 <body>
@@ -70,13 +65,10 @@
   <div id="hud"></div>
   <div id="conn" class="hidden"></div>
   <div id="toast"></div>
-  <div class="row" id="r1"><button class="small" id="bmute">🎤</button><button class="small" id="zo">−</button><button class="small" id="zi">+</button><button class="small" id="resp">⟲</button></div>
+  <div class="row" id="r1"><button class="small" id="bmute">🎤</button><button class="small" id="zo">−</button><button class="small" id="zi">+</button><button class="small" id="resp">⟲</button><button class="small" id="bghost">👻</button></div>
   <div class="row" id="r2"><button class="small" id="bleave">Leave</button><button class="small" id="binvite">🔗</button><button class="small mine" id="bmode">⛏ Mine</button><button class="small" id="blayer">Front</button></div>
   <div id="hotbar"></div>
-  <div id="bottom">
-    <div class="pad"><button class="pbtn" id="bl">◀</button><button class="pbtn" id="br">▶</button></div>
-    <button class="pbtn" id="bj">JUMP</button>
-  </div>
+  <div id="sab"></div>
 </div>
 <div id="audio-out"></div>
 
@@ -412,7 +404,6 @@
   "use strict";
 
   const SKY = "#6aa7ff";
-  const VOID = "#0a0a12";   // an empty tile below the original surface (front AND back removed)
 
   // chunk index range covered by the view (camera is the view centre, in tiles)
   function visibleRange(camX, camY, vw, vh, tilePx, CH, CX, CY, margin) {
@@ -459,10 +450,7 @@
     function paint(e, c, lx, ly) {
       const i = ly * CH + lx, f = c.front[i], id = f || c.back[i];     // front blocks are opaque: skip the wall behind them
       if (id) e.ctx.drawImage(atlas.canvas, id * S, (variant(e.cx * CH + lx, e.cy * CH + ly) * 2 + (f ? 0 : 1)) * S, S, S, lx * S, ly * S, S, S);
-      else if (e.cy * CH + ly >= world.surfaceY(e.cx * CH + lx)) {     // hole below ground: dark void, not sky
-        e.ctx.fillStyle = VOID;
-        e.ctx.fillRect(lx * S, ly * S, S, S);
-      }
+      // no block and no wall: left transparent, so the same sky shows through (above ground or below)
     }
 
     // Fast path: copy atlas pixels straight into one ImageData and upload it once per chunk,
@@ -475,7 +463,6 @@
         if (ac && ac.getImageData) fast = { px: new Uint32Array(ac.getImageData(0, 0, atlas.canvas.width, atlas.canvas.height).data.buffer), aw: atlas.canvas.width };
       } catch (_) { fast = null; }
     }
-    const VOID32 = 0xff120a0a;                       // #0a0a12, opaque, as little-endian RGBA
     function paintFast(e, c) {
       const N = S * CH, img = e.ctx.createImageData(N, N), dst = new Uint32Array(img.data.buffer), px = fast.px, aw = fast.aw;
       for (let ly = 0; ly < CH; ly++) {
@@ -484,9 +471,7 @@
           if (id) {
             const s0 = (variant(e.cx * CH + lx, e.cy * CH + ly) * 2 + (f ? 0 : 1)) * S * aw + id * S;
             for (let r = 0; r < S; r++) { const s1 = s0 + r * aw, d1 = d0 + r * N; for (let k = 0; k < S; k++) dst[d1 + k] = px[s1 + k]; }
-          } else if (e.cy * CH + ly >= world.surfaceY(e.cx * CH + lx)) {
-            for (let r = 0; r < S; r++) { const d1 = d0 + r * N; for (let k = 0; k < S; k++) dst[d1 + k] = VOID32; }
-          }
+          }                                                 // else: transparent, the sky shows through
         }
       }
       e.ctx.putImageData(img, 0, 0);
@@ -586,7 +571,7 @@
 //  Plain <script> (global `Player`) or Node.
 //    const pl = Player.create(world);
 //    pl.spawn(5000);                       // drop in above the surface
-//    pl.update(dt, { left, right, jump });
+//    pl.update(dt, { ax, jump, crouch, ghost, ay });   // ax/ay analog -1..1 (or left/right booleans)
 //    pl.x, pl.y, pl.vx, pl.vy, pl.onGround
 // ═══════════════════════════════════════════════════════════════
 (function (root, factory) {
@@ -596,20 +581,27 @@
   "use strict";
 
   const PW = 0.6, PH = 1.8;       // size in tiles. worker.js reaches from the body centre (PW/2, PH/2): keep both in step
-  const SPD = 6;                  // walk speed, tiles/s
+  const SPD = 6;                  // walk speed at full stick, tiles/s
+  const CROUCH_SPD = 3;           // crouch-walk speed at full stick
+  const GHOST_SPD = 18;           // ghost-mode flying speed at full stick
   const G = 32;                   // gravity, tiles/s²
   const JUMP = 13.5;              // jump speed -> apex ≈ 2.85 tiles (clears a 2-block step)
+  const HOP = 9;                  // automatic small hop over a 1-block ledge: apex ≈ 1.27 tiles
   const MAXFALL = 45;             // terminal velocity, tiles/s
   const EPS = 1e-6, GAP = 1e-4;   // GAP > EPS: resting contact never counts as overlap
+  const CH = 1 - 3 * GAP;         // crouching height: 1 m (a hair under, so a body resting a GAP above the floor fits a 1-block-high gap)
   const STEP = 0.25;              // max movement per collision step, tiles
   const SUBSTEP = 1 / 60;         // physics is integrated in slices of at most this
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+  // input: { ax: -1..1 (analog, no dead zone) or left/right booleans, jump, crouch, ghost, ay: -1..1 (ghost mode only, +down) }
   function create(world) {
-    const pl = { x: 0, y: 0, vx: 0, vy: 0, onGround: false };
+    const pl = { x: 0, y: 0, vx: 0, vy: 0, h: PH, onGround: false, crouching: false, ghost: false };
 
-    function hits(x, y) {
+    function hits(x, y, h) {
+      if (h === undefined) h = pl.h;
       const x0 = Math.floor(x), x1 = Math.floor(x + PW - EPS);
-      const y0 = Math.floor(y), y1 = Math.floor(y + PH - EPS);
+      const y0 = Math.floor(y), y1 = Math.floor(y + h - EPS);
       for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (world.solidAt(tx, ty)) return true;
       return false;
     }
@@ -619,9 +611,9 @@
         const s = Math.abs(d) > STEP ? Math.sign(d) * STEP : d;
         pl.x += s; d -= s;
         if (hits(pl.x, pl.y)) {
-          if (pl.onGround) {                               // auto-step: walk up a 1-block ledge without jumping
-            const upY = Math.ceil(pl.y + PH - 1e-9) - 1 - PH - GAP;
-            if (!hits(pl.x, upY)) { pl.y = upY; continue; }
+          if (pl.onGround) {                               // a 1-block ledge: hop up it with a real small jump (never a snap)
+            const upY = Math.ceil(pl.y + pl.h - 1e-9) - 1 - pl.h - GAP;
+            if (!hits(pl.x, upY) && !hits(pl.x - s, pl.y - 1.3)) { pl.x -= s; pl.vy = -HOP; pl.onGround = false; return; }
           }
           pl.x = s > 0 ? Math.floor(pl.x + PW - EPS) - PW - GAP : Math.floor(pl.x) + 1 + GAP;
           pl.vx = 0;
@@ -634,7 +626,7 @@
         const s = Math.abs(d) > STEP ? Math.sign(d) * STEP : d;
         pl.y += s; d -= s;
         if (hits(pl.x, pl.y)) {
-          if (s > 0) { pl.y = Math.floor(pl.y + PH - EPS) - PH - GAP; pl.onGround = true; }
+          if (s > 0) { pl.y = Math.floor(pl.y + pl.h - EPS) - pl.h - GAP; pl.onGround = true; }
           else pl.y = Math.floor(pl.y) + 1 + GAP;
           pl.vy = 0;
           return;
@@ -642,9 +634,15 @@
       }
     }
 
-    function step(dt, input) {
-      pl.vx = ((input.right ? 1 : 0) - (input.left ? 1 : 0)) * SPD;
-      if (input.jump && pl.onGround) pl.vy = -JUMP;
+    function crouchTo(want) {                          // feet stay where they are; standing up needs headroom
+      if (want && !pl.crouching) { if (pl.onGround) { pl.y += PH - CH; pl.h = CH; pl.crouching = true; } }
+      else if (!want && pl.crouching && !hits(pl.x, pl.y - (PH - CH), PH)) { pl.y -= PH - CH; pl.h = PH; pl.crouching = false; }
+    }
+
+    function step(dt, input, ax) {
+      crouchTo(!!input.crouch);
+      pl.vx = ax * (pl.crouching ? CROUCH_SPD : SPD);
+      if (input.jump && pl.onGround && !pl.crouching) pl.vy = -JUMP;
       pl.vy = Math.min(pl.vy + G * dt, MAXFALL);
       moveX(pl.vx * dt);
       pl.onGround = false;                                 // re-detected by moveY when we touch the floor
@@ -652,24 +650,43 @@
       if (pl.y < 0) { pl.y = 0; if (pl.vy < 0) pl.vy = 0; } // top of the world
     }
 
+    // ghost mode: no gravity, no collisions, analog 2-D flight
+    function ghostStep(dt, input, ax) {
+      if (pl.crouching) { pl.y -= PH - CH; pl.h = PH; pl.crouching = false; }
+      pl.vx = ax * GHOST_SPD; pl.vy = clamp(input.ay || 0, -1, 1) * GHOST_SPD; pl.onGround = false;
+      pl.x = clamp(pl.x + pl.vx * dt, 0, world.W - PW); pl.y = clamp(pl.y + pl.vy * dt, 0, world.H - PH);
+    }
+
+    // leaving ghost mode inside the ground: climb up to the first free spot
+    function settle() {
+      for (let i = 0; i < 8200 && hits(pl.x, pl.y, PH); i++) pl.y -= 0.25;
+      pl.y = Math.max(0, pl.y); pl.vx = pl.vy = 0;
+    }
+
     pl.update = function (dt, input) {
+      const ax = clamp(input.ax !== undefined ? input.ax : ((input.right ? 1 : 0) - (input.left ? 1 : 0)), -1, 1);
+      if (input.ghost) { pl.ghost = true; ghostStep(dt, input, ax); return; }
+      if (pl.ghost) { pl.ghost = false; settle(); }
       for (let i = 0; i < 8 && hits(pl.x, pl.y); i++) pl.y -= 0.5;   // a block was placed on us: pop out upward
       const n = Math.max(1, Math.ceil(dt / SUBSTEP));
-      for (let i = 0; i < n; i++) step(dt / n, input);
+      for (let i = 0; i < n; i++) step(dt / n, input, ax);
     };
 
     // drop in just above the surface at column x
     pl.spawn = function (x) {
       pl.x = Math.max(0, Math.min(world.W - PW - 0.01, x));
       const top = Math.min(world.surfaceY(Math.floor(pl.x)), world.surfaceY(Math.floor(pl.x + PW)));
+      pl.h = PH; pl.crouching = false; pl.ghost = false;
       pl.y = top - PH - GAP; pl.vx = 0; pl.vy = 0; pl.onGround = false;
     };
+    // top of a STANDING body whose feet are where mine are. This is what other players are told (they draw a standing person), and what reach is measured from.
+    pl.standY = () => pl.y + pl.h - PH;
 
     pl.hits = hits;
     return pl;
   }
 
-  return { create, PW, PH, SPD, G, JUMP, MAXFALL };
+  return { create, PW, PH, CH, SPD, CROUCH_SPD, GHOST_SPD, G, JUMP, HOP, MAXFALL };
 });
 </script>
 <script>
@@ -726,7 +743,7 @@
   // ── animation state ───────────────────────────────────────────
   function create(opts) {
     return {
-      face: 1, t: 0, phase: 0, walkW: 0, airW: 0, vy: 0, wasAir: false, prevVy: 0, land: 0, landAmp: 0,
+      face: 1, t: 0, phase: 0, walkW: 0, airW: 0, crouchW: 0, vy: 0, wasAir: false, prevVy: 0, land: 0, landAmp: 0,
       act: null, toolT: 0, talking: false, blink: 0, blinkIn: 1.5 + ((opts && opts.rand ? opts.rand() : Math.random()) * 2.5),
       rand: (opts && opts.rand) || Math.random,
     };
@@ -735,11 +752,12 @@
   function update(st, dt, m) {
     dt = clamp(dt, 0, 0.1);
     st.t += dt;
-    const sp = Math.abs(m.vx || 0), onGround = !!m.onGround, walking = onGround && sp > 0.3;
+    const sp = Math.abs(m.vx || 0), onGround = !!m.onGround, walking = onGround && sp > 0.3;      // m.crouch: squatting (1 m tall instead of 1.8)
     if (sp > 0.3 && !st.act) st.face = m.vx > 0 ? 1 : -1;                 // turn to walk, but keep facing the work while acting
     st.walkW += ((walking ? 1 : 0) - st.walkW) * (1 - Math.exp(-16 * dt));
     st.airW += ((onGround ? 0 : 1) - st.airW) * (1 - Math.exp(-20 * dt));
     if (walking) st.phase = (st.phase + sp * dt * 1.9) % (Math.PI * 2);
+    st.crouchW += ((m.crouch ? 1 : 0) - st.crouchW) * (1 - Math.exp(-18 * dt));
     st.vy = m.vy || 0;
     if (st.wasAir && onGround && st.prevVy > 6) { st.land = LAND_T; st.landAmp = clamp(st.prevVy / 30, 0.3, 1); }
     st.wasAir = !onGround; if (!onGround) st.prevVy = st.vy;
@@ -777,6 +795,15 @@
     const sq = st.land > 0 ? (st.land / LAND_T) * st.landAmp : 0;
     const squashY = 1 - 0.14 * sq, squashX = 1 + 0.10 * sq;
     if (sq > 0) { legF += 0.35 * sq; legB -= 0.35 * sq; }
+    // crouching: hips drop, knees fold, the body tips forward. (c = 0 standing … 1 fully crouched)
+    const c = st.crouchW;
+    let thighF = legF, shinF = legF, thighB = legB, shinB = legB;
+    if (c > 0.001) {
+      bob = lerp(bob, breathe * 0.2, c);
+      thighF = lerp(legF, 1.45 + sinP * 0.22 * w, c); shinF = lerp(legF, -1.35 - sinP * 0.15 * w, c);
+      thighB = lerp(legB, 1.28 - sinP * 0.22 * w, c); shinB = lerp(legB, -1.5 + sinP * 0.15 * w, c);
+      lean = lerp(lean, -0.85, c); armF = lerp(armF, 0.9, c); armB = lerp(armB, 0.5, c);
+    }
     // actions override the front arm
     let tool = null, toolColour = null;
     if (st.act) {
@@ -792,7 +819,7 @@
         tool = "block"; toolColour = A.colour;
       }
     } else if (st.toolT > 0) tool = "pick";                                // keeps the pickaxe in hand a moment after mining
-    return { bob, lean, legF, legB, armF, armB, squashX, squashY, tool, toolColour, blink: st.blink > 0, mouthOpen: st.talking && Math.sin(st.t * 30) > 0 };
+    return { bob, lean, crouch: c, thighF, shinF, thighB, shinB, legF, legB, armF, armB, squashX, squashY, tool, toolColour, blink: st.blink > 0, mouthOpen: st.talking && Math.sin(st.t * 30) > 0 };
   }
 
   // ── drawing ───────────────────────────────────────────────────
@@ -808,18 +835,21 @@
     ctx.translate(Math.round(x + bw / 2), Math.round(y + bh));            // origin: feet, centre of the box
     ctx.scale(st.face * u * p.squashX, u * p.squashY);                    // art-pixel units; mirrored when facing left
     ctx.translate(0, 0);
-    const bob = p.bob;
+    const bob = p.bob, D = 8 * p.crouch;                              // D: how far the hips have dropped (art px)
+    const shX = -9.5 * Math.sin(p.lean), shY = -10 + D - 9.5 * Math.cos(p.lean) + bob;       // shoulder joint: follows the torso lean
+    const leg = (hipY, thigh, shin, cp, cs, cshoe) => limb(0, hipY, thigh, () => { rect(cp, -1.5, 0, 3, 5.4); limb(0, 5, shin - thigh, () => { rect(cp, -1.5, -0.4, 3, 2.9); rect(cshoe, -1.5, 2.5, 4, 2.5); }); });
 
     // back arm and back leg (darker, behind the torso)
-    limb(0, -19.5 + bob, p.armB, () => { rect(shirtD, -1.5, 0, 3, 6); rect(skinD, -1.5, 6, 3, 3.5); });
-    limb(0, -10, p.legB, () => { rect(pantsD, -1.5, 0, 3, 7.5); rect(shoe, -1.5, 7.5, 4, 2.5); });
+    limb(shX, shY, p.armB, () => { rect(shirtD, -1.5, 0, 3, 6); rect(skinD, -1.5, 6, 3, 3.5); });
+    leg(-10 + D, p.thighB, p.shinB, pantsD, 0, shoe);
 
     // torso (leans a little with movement), then the head on top of it
-    ctx.save(); ctx.translate(0, -10 + bob * 0.5); ctx.rotate(-p.lean); ctx.translate(0, 10 - bob * 0.5);
+    ctx.save(); ctx.translate(0, -10 + D + bob * 0.5); ctx.rotate(-p.lean); ctx.translate(0, 10 - bob * 0.5);
     rect(shirt, -3, -21 + bob, 6, 11);
     rect(shirtD, -3, -12 + bob, 6, 1);                                    // hem
     rect(rgb(pal.pants, 0.9), -3, -11 + bob, 6, 1.2);                     // belt line / waist
-    // head: hair at the back and on top, face and a nose at the front, one eye
+    // head: hair at the back and on top, face and a nose at the front, one eye. It tilts back up against the leaning torso so a crouching person still looks ahead
+    ctx.save(); ctx.translate(0, -21 + bob); ctx.rotate(p.lean * 0.55); ctx.translate(0, 21 - bob);
     rect(skin, -4, -29 + bob, 8, 8);
     rect(skin, 4, -25 + bob, 1, 1.6);                                     // nose
     rect(hair, -4, -29 + bob, 8, 3);                                      // top of the hair
@@ -830,12 +860,13 @@
     else { rect("rgb(255,255,255)", 1, -25.5 + bob, 2.4, 2.2); rect(rgb(pal.eye), 2.2, -25.2 + bob, 1.2, 1.8); }
     if (p.mouthOpen) rect("rgb(120,40,44)", 2.2, -22.6 + bob, 2, 1.2); else rect(skinD, 2.4, -22.4 + bob, 1.6, 0.6);
     ctx.restore();
+    ctx.restore();
 
     // front leg, shoes extend a pixel forward
-    limb(0, -10, p.legF, () => { rect(pants, -1.5, 0, 3, 7.5); rect(shoe, -1.5, 7.5, 4, 2.5); });
+    leg(-10 + D, p.thighF, p.shinF, pants, 0, shoe);
 
     // front arm, last so it is in front of the body; carries the pickaxe or a block
-    limb(0, -19.5 + bob, p.armF, () => {
+    limb(shX, shY, p.armF, () => {
       rect(shirt, -1.5, 0, 3, 6); rect(skin, -1.5, 6, 3, 3.5);
       if (p.tool === "pick") { rect("rgb(120,84,48)", -0.5, 7, 1, 8); rect("rgb(170,176,186)", -3.5, 14, 7, 2); rect("rgb(120,126,138)", -3.5, 15.2, 7, 0.8); }
       else if (p.tool === "block") { rect(p.toolColour ? rgb(p.toolColour) : "rgb(134,96,67)", -1.5, 8.5, 4, 4); rect("rgba(0,0,0,.25)", -1.5, 11.5, 4, 1); }
@@ -844,6 +875,130 @@
   }
 
   return { BOX_W, BOX_H, LAND_T, MINE_T, PLACE_T, create, update, act, pose, draw, palette };
+});
+</script>
+<script>
+/* ═══ joystick.js ═══ */
+// ═══════════════════════════════════════════════════════════════
+//  joystick.js — the two on-screen sticks  (step 11)
+//
+//  Pure logic + drawing, no DOM. The page feeds it pointer positions (CSS px) and reads the numbers.
+//
+//  FLAT stick (normal walking): a horizontal groove with a knob.
+//    • knob moves only sideways; ax = -1..1, proportional, NO dead zone
+//    • drag up past the groove  → knob snaps on top, `jump` is held (keeps jumping while you hold it) and sideways still works
+//    • drag down past the groove → knob snaps below, `crouch` is held
+//    • the free space above and below the groove belongs to the stick (that is where you drag to)
+//    • once pressed, the finger may wander anywhere: the stick keeps working until the finger lifts
+//    • when a direction is at its limit (left, right, up, down) a blue haze glows around the knob on that side
+//
+//  ROUND stick (ghost mode): appears where the finger lands (lower half of the screen only).
+//    • vec = {x, y} with |vec| ≤ 1, proportional, NO dead zone; at the limit a blue haze glows on that side of the knob
+//    • finger may leave the base: the direction and full speed continue until it lifts
+//
+//  Plain <script> (global `Joystick`) or Node.
+// ═══════════════════════════════════════════════════════════════
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.Joystick = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const HAZE = "rgba(70,150,255,";
+
+  // ── flat stick ────────────────────────────────────────────────
+  // geometry: groove centre (cx, cy), travel = half the length knob can move, grooveH, free space above (up) and below (down), side padding
+  function flat(g) {
+    const s = {
+      g: Object.assign({ cx: 100, cy: 100, travel: 56, grooveH: 34, up: 84, down: 60, pad: 26 }, g),
+      id: null, ax: 0, jump: false, crouch: false, kx: 0, ky: 0,
+      maxed: { left: false, right: false, up: false, down: false },
+    };
+    function apply(x, y) {
+      const q = s.g, dy = y - q.cy, enter = q.grooveH / 2 + 6, leave = q.grooveH / 2;
+      s.ax = clamp((x - q.cx) / q.travel, -1, 1);
+      // snapping has hysteresis so the knob doesn't flicker on the edge
+      const up = s.jump ? dy < -leave : dy < -enter, down = s.crouch ? dy > leave : dy > enter;
+      s.jump = up; s.crouch = !up && down;
+      s.kx = s.ax * q.travel; s.ky = s.jump ? -(q.grooveH / 2 + 20) : s.crouch ? q.grooveH / 2 + 20 : 0;
+      s.maxed = { left: s.ax <= -1, right: s.ax >= 1, up: s.jump, down: s.crouch };
+    }
+    s.contains = (x, y) => { const q = s.g; return x >= q.cx - q.travel - q.pad && x <= q.cx + q.travel + q.pad && y >= q.cy - q.up && y <= q.cy + q.down; };
+    s.press = (id, x, y) => { if (s.id !== null) return false; s.id = id; apply(x, y); return true; };
+    s.move = (id, x, y) => { if (id === s.id) apply(x, y); };
+    s.release = (id) => { if (id !== s.id) return false; s.reset(); return true; };
+    s.reset = () => { s.id = null; s.ax = 0; s.jump = s.crouch = false; s.kx = s.ky = 0; s.maxed = { left: false, right: false, up: false, down: false }; };
+    return s;
+  }
+
+  // ── round stick ───────────────────────────────────────────────
+  function round(opts) {
+    const s = { radius: (opts && opts.radius) || 56, id: null, ox: 0, oy: 0, x: 0, y: 0, mag: 0, ang: 0, maxed: false, kx: 0, ky: 0 };
+    function apply(px, py) {
+      const dx = px - s.ox, dy = py - s.oy, len = Math.hypot(dx, dy);
+      s.mag = Math.min(1, len / s.radius);
+      s.ang = Math.atan2(dy, dx);
+      s.x = len > 0 ? dx / len * s.mag : 0; s.y = len > 0 ? dy / len * s.mag : 0;
+      s.maxed = len >= s.radius;
+      s.kx = s.x * s.radius; s.ky = s.y * s.radius;
+    }
+    s.press = (id, x, y) => { if (s.id !== null) return false; s.id = id; s.ox = x; s.oy = y; apply(x, y); return true; };
+    s.move = (id, x, y) => { if (id === s.id) apply(x, y); };
+    s.release = (id) => { if (id !== s.id) return false; s.reset(); return true; };
+    s.reset = () => { s.id = null; s.x = s.y = s.mag = s.kx = s.ky = 0; s.maxed = false; };
+    return s;
+  }
+
+  // may a new round stick start here? lower half of the screen, not on a button/ribbon (rects: [{left,top,right,bottom}])
+  function canStartRound(x, y, viewH, rects) {
+    if (y < viewH / 2) return false;
+    for (const r of rects || []) if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return false;
+    return true;
+  }
+
+  // ── drawing (ctx is scaled by `k` canvas px per CSS px) ───────
+  function glow(ctx, x, y, r, ang, spread, k) {              // a blue arc hugging one side of the knob
+    ctx.save();
+    ctx.strokeStyle = HAZE + ".9)"; ctx.lineWidth = 5 * k; ctx.shadowColor = HAZE + "1)"; ctx.shadowBlur = 18 * k; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(x, y, r, ang - spread, ang + spread); ctx.stroke();
+    ctx.restore();
+  }
+  function knob(ctx, x, y, r, held, k) {
+    ctx.fillStyle = held ? "rgba(235,240,255,.92)" : "rgba(235,240,255,.55)";
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(20,26,46,.55)"; ctx.lineWidth = 2 * k; ctx.stroke();
+  }
+  function drawFlat(ctx, s, k) {
+    const q = s.g, held = s.id !== null, x0 = q.cx - q.travel, w = q.travel * 2, h = q.grooveH;
+    ctx.save(); ctx.scale(k, k);
+    ctx.fillStyle = held ? "rgba(20,26,46,.55)" : "rgba(20,26,46,.38)";                 // the groove
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x0 - 12, q.cy - h / 2, w + 24, h, h / 2) : ctx.rect(x0 - 12, q.cy - h / 2, w + 24, h); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.28)"; ctx.lineWidth = 1.5; ctx.stroke();
+    if (held && (s.jump || s.crouch)) {                                                    // pull-zone hints while dragging vertically
+      ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.font = "600 11px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(s.jump ? "JUMP" : "CROUCH", q.cx, q.cy + (s.jump ? -h / 2 - 48 : h / 2 + 52));
+    } else if (!held) { ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.font = "600 10px system-ui"; ctx.textAlign = "center"; ctx.fillText("▲ jump   crouch ▼", q.cx, q.cy + h / 2 + 14); }
+    const kx = q.cx + s.kx, ky = q.cy + s.ky, kr = h * 0.62;
+    const m = s.maxed;
+    if (m.right) glow(ctx, kx, ky, kr + 3, 0, 0.9, 1);
+    if (m.left) glow(ctx, kx, ky, kr + 3, Math.PI, 0.9, 1);
+    if (m.up) glow(ctx, kx, ky, kr + 3, -Math.PI / 2, 0.9, 1);
+    if (m.down) glow(ctx, kx, ky, kr + 3, Math.PI / 2, 0.9, 1);
+    knob(ctx, kx, ky, kr, held, 1);
+    ctx.restore();
+  }
+  function drawRound(ctx, s, k) {
+    if (s.id === null) return;
+    ctx.save(); ctx.scale(k, k);
+    ctx.fillStyle = "rgba(20,26,46,.4)"; ctx.strokeStyle = "rgba(255,255,255,.3)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(s.ox, s.oy, s.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (s.maxed) glow(ctx, s.ox + s.kx, s.oy + s.ky, 26, s.ang, 0.9, 1);
+    knob(ctx, s.ox + s.kx, s.oy + s.ky, 24, true, 1);
+    ctx.restore();
+  }
+
+  return { flat, round, canStartRound, drawFlat, drawRound };
 });
 </script>
 <script>
@@ -897,10 +1052,11 @@
     const inWorld = (x, y) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < world.W && y >= 0 && y < world.H;
 
     function distance(x, y) {
-      return Math.hypot(x + 0.5 - (player.x + Player.PW / 2), y + 0.5 - (player.y + Player.PH / 2));
+      const sy = player.y + (player.h || Player.PH) - Player.PH;        // top of a STANDING body with my feet: the server measures reach from the same point
+      return Math.hypot(x + 0.5 - (player.x + Player.PW / 2), y + 0.5 - (sy + Player.PH / 2));
     }
     function overlapsPlayer(x, y) {
-      return player.x < x + 1 && player.x + Player.PW > x && player.y < y + 1 && player.y + Player.PH > y;
+      return player.x < x + 1 && player.x + Player.PW > x && player.y < y + 1 && player.y + (player.h || Player.PH) > y;
     }
     function filled(x, y) { return world.getTile(x, y, FRONT) !== B.AIR || world.getTile(x, y, BACK) !== B.AIR; }
     function supported(x, y) { return filled(x, y) || filled(x - 1, y) || filled(x + 1, y) || filled(x, y - 1) || filled(x, y + 1); }
@@ -1072,7 +1228,25 @@ const atlas = Textures.build();
 const remotes = new Map();                                    // id -> { name, x, y, dx, dy }  (dx,dy = smoothed draw position)
 const me = { speaking: false, ch: null, pal: null };            // my own character: animation state + look (made when the world is)
 const pending = new Map();                                    // my edits the server hasn't echoed yet: key -> { x, y, l, from, t }
-const input = { left: false, right: false, jump: false };
+const keys = { left: false, right: false, jump: false, crouch: false };   // keyboard
+let ghost = false;                                            // ghost mode: fly through everything (round stick); otherwise walk (flat stick)
+const flat = Joystick.flat(), round = Joystick.round({ radius: 56 });
+function layoutSticks() {                                     // flat stick: bottom-left, with free space above (jump) and below (crouch)
+  const safe = $("sab").offsetHeight || 0;
+  Object.assign(flat.g, { cx: 14 + flat.g.pad + flat.g.travel, cy: innerHeight - 96 - safe });
+}
+addEventListener("resize", layoutSticks);
+function buildInput() {                                       // sticks win while touched, keyboard otherwise
+  const kx = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+  if (ghost) return { ghost: true, ax: round.id !== null ? round.x : kx, ay: round.id !== null ? round.y : (keys.crouch ? 1 : 0) - (keys.jump ? 1 : 0) };
+  return { ax: flat.id !== null ? flat.ax : kx, jump: keys.jump || flat.jump, crouch: keys.crouch || flat.crouch };
+}
+function setGhost(on) {
+  ghost = on; flat.reset(); round.reset();
+  $("bghost").classList.toggle("on", on);
+  toast(on ? "Ghost mode: fly anywhere. Drag in the lower half of the screen." : "Walking again", 2500);
+}
+$("bghost").onclick = () => { if (world) setGhost(!ghost); };
 const timers = [];
 
 const canvas = $("c"), ctx = canvas.getContext("2d", { alpha: false });
@@ -1155,7 +1329,7 @@ function leave(msg) {
   $("audio-out").innerHTML = "";
   world = R = pl = Ed = null; lastSpawned = false;
   remotes.clear(); pending.clear();
-  input.left = input.right = input.jump = false; aim.down = false;
+  keys.left = keys.right = keys.jump = keys.crouch = false; flat.reset(); round.reset(); ghost = false; $("bghost").classList.remove("on"); aim.down = false;
   window.__world = window.__pl = null;
   $("game").classList.add("hidden"); $("join").classList.remove("hidden");
   setStatus(msg || "");
@@ -1210,7 +1384,7 @@ function onInit(m) {
     Ed = Edit.create({ world, player: pl, renderer: R });
     me.ch = Character.create(); me.pal = Character.palette(myId);
     window.__world = world; window.__pl = pl; window.__ed = Ed; window.__R = R; window.__me = me;
-    pl.spawn(m.spawnX); camX = pl.x + Player.PW / 2; camY = pl.y + Player.PH / 2;
+    pl.spawn(m.spawnX); camX = pl.x + Player.PW / 2; camY = pl.standY() + Player.PH / 2; layoutSticks();
     refreshUI();
     toast("Tap blocks to mine. Pick a block below to build.", 3000);
   } else { world.reset(); R.clear(); }                          // reconnect: rebuild from the full edit list so nothing can drift
@@ -1270,8 +1444,9 @@ let lastSent = { x: -1, y: -1, t: 0 };
 function sendPos() {
   if (!net || !net.ready || !pl) return;
   const now = performance.now();
-  if (Math.abs(pl.x - lastSent.x) < 0.01 && Math.abs(pl.y - lastSent.y) < 0.01 && now - lastSent.t < 1000) return;
-  if (net.sendPos(pl.x, pl.y)) lastSent = { x: pl.x, y: pl.y, t: now };
+  const py = pl.standY();                                       // others draw a standing person with the same feet
+  if (Math.abs(pl.x - lastSent.x) < 0.01 && Math.abs(py - lastSent.y) < 0.01 && now - lastSent.t < 1000) return;
+  if (net.sendPos(pl.x, py)) lastSent = { x: pl.x, y: py, t: now };
 }
 
 // ── proximity voice ─────────────────────────────────────────────
@@ -1299,7 +1474,7 @@ const zoomPx = () => ZOOMS[zi] * dpr;
 $("zi").onclick = () => { zi = Math.min(ZOOMS.length - 1, zi + 1); };
 $("zo").onclick = () => { zi = Math.max(0, zi - 1); };
 let camX = 0, camY = 0;
-$("resp").onclick = () => { if (pl) { pl.spawn(Math.floor(pl.x)); camX = pl.x + Player.PW / 2; camY = pl.y + Player.PH / 2; sendPos(); } };   // lift yourself out of a pit
+$("resp").onclick = () => { if (pl) { pl.spawn(Math.floor(pl.x)); camX = pl.x + Player.PW / 2; camY = pl.standY() + Player.PH / 2; sendPos(); } };   // lift yourself out of a pit
 
 // ── build state: what a tap does ────────────────────────────────
 let mode = "mine", layer = World.FRONT, slot = 0;
@@ -1345,49 +1520,55 @@ function act(announce) {
   }
   if (r.to === 0) puff(r.x, r.y, r.from, r.layer === 1);
   if (!me.ch.act || me.ch.act.t > me.ch.act.dur * 0.55)       // swing the arm (while holding the button, start the next swing once this one is mostly done)
-    Character.act(me.ch, r.to === 0 ? "mine" : "place", r.x + 0.5 - (pl.x + Player.PW / 2), r.y + 0.5 - (pl.y + Player.PH / 2), BLOCK_COL[r.to]);
+    Character.act(me.ch, r.to === 0 ? "mine" : "place", r.x + 0.5 - (pl.x + Player.PW / 2), r.y + 0.5 - (pl.standY() + Player.PH / 2), BLOCK_COL[r.to]);
   const key = (r.y * World.W + r.x) * 2 + r.layer;
   if (!pending.has(key)) pending.set(key, { x: r.x, y: r.y, l: r.layer, from: r.from, t: performance.now() });
   else pending.get(key).t = performance.now();
   net.sendEdit(r.x, r.y, r.layer, r.to);                        // applied locally already; the server's echo makes it official
 }
+const sticking = new Set();                                    // pointer ids that belong to a stick (never to the aim)
+const viewRects = () => ["r1", "r2", "hotbar"].map((id) => $(id).getBoundingClientRect());
 canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
-  Object.assign(aim, { down: true, id: e.pointerId, cx: e.clientX, cy: e.clientY, button: e.button, cool: 0.3 });
+  let took = false;
+  if (ghost) { if (Joystick.canStartRound(e.clientX, e.clientY, innerHeight, viewRects())) took = round.press(e.pointerId, e.clientX, e.clientY); }
+  else if (flat.contains(e.clientX, e.clientY)) took = flat.press(e.pointerId, e.clientX, e.clientY);
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (took) { sticking.add(e.pointerId); return; }
+  Object.assign(aim, { down: true, id: e.pointerId, cx: e.clientX, cy: e.clientY, button: e.button, cool: 0.3 });
   act(true);
 });
-canvas.addEventListener("pointermove", (e) => { aim.cx = e.clientX; aim.cy = e.clientY; aim.hover = e.pointerType === "mouse"; });
-const release = (e) => { if (e.pointerId === aim.id) aim.down = false; };
+canvas.addEventListener("pointermove", (e) => {
+  if (sticking.has(e.pointerId)) { flat.move(e.pointerId, e.clientX, e.clientY); round.move(e.pointerId, e.clientX, e.clientY); return; }
+  if (aim.down && e.pointerId !== aim.id) return;                // a second finger (e.g. on the stick) must not drag the aim
+  aim.cx = e.clientX; aim.cy = e.clientY; aim.hover = e.pointerType === "mouse";
+});
+const release = (e) => {
+  if (sticking.delete(e.pointerId)) { flat.release(e.pointerId); round.release(e.pointerId); return; }
+  if (e.pointerId === aim.id) aim.down = false;
+};
 canvas.addEventListener("pointerup", release); canvas.addEventListener("pointercancel", release);
 canvas.addEventListener("pointerleave", () => { aim.hover = false; });
 
-// ── movement input: on-screen buttons + keyboard ────────────────
-function bindPad(btn, key) {
-  const down = (e) => { e.preventDefault(); input[key] = true; btn.classList.add("held"); try { btn.setPointerCapture(e.pointerId); } catch (_) {} };
-  const up = () => { input[key] = false; btn.classList.remove("held"); };
-  btn.addEventListener("pointerdown", down);
-  btn.addEventListener("pointerup", up); btn.addEventListener("pointercancel", up); btn.addEventListener("lostpointercapture", up);
-  btn.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
-}
-bindPad($("bl"), "left"); bindPad($("br"), "right"); bindPad($("bj"), "jump");
-const KEYS = { arrowleft: "left", a: "left", arrowright: "right", d: "right", arrowup: "jump", w: "jump", " ": "jump" };
+// ── keyboard (sticks are handled with the pointer events above) ──
+const KEYS = { arrowleft: "left", a: "left", arrowright: "right", d: "right", arrowup: "jump", w: "jump", " ": "jump", arrowdown: "crouch", s: "crouch" };
 addEventListener("keydown", (e) => {
   if (!world || e.target.tagName === "INPUT") return;
   const k = e.key.toLowerCase();
-  if (KEYS[k]) { input[KEYS[k]] = true; e.preventDefault(); }
+  if (KEYS[k]) { keys[KEYS[k]] = true; e.preventDefault(); }
   else if (k >= "1" && k <= String(PLACE.length)) { slot = +k - 1; mode = "place"; refreshUI(); }
   else if (k === "q") $("bmode").click();
   else if (k === "e") $("blayer").click();
+  else if (k === "g") $("bghost").click();
   else if (k === "m") toggleMute();
 });
-addEventListener("keyup", (e) => { const k = KEYS[e.key.toLowerCase()]; if (k) input[k] = false; });
-addEventListener("blur", () => { input.left = input.right = input.jump = false; aim.down = false; });
+addEventListener("keyup", (e) => { const k = KEYS[e.key.toLowerCase()]; if (k) keys[k] = false; });
+addEventListener("blur", () => { keys.left = keys.right = keys.jump = keys.crouch = false; flat.reset(); round.reset(); sticking.clear(); aim.down = false; });
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // hooks for automated tests
 window.__tileToClient = (tx, ty) => { const z = zoomPx(); return [(canvas.width / 2 + (tx + 0.5 - camX) * z) / dpr, (canvas.height / 2 + (ty + 0.5 - camY) * z) / dpr]; };
-window.__remotes = remotes; window.__pending = pending;
+window.__remotes = remotes; window.__pending = pending; window.__sticks = { flat, round }; window.__setGhost = setGhost;
 
 // a green ring around anyone who is talking (drawn around the character's whole collision box)
 function ring(sx, sy, w, h, lw) {
@@ -1406,9 +1587,9 @@ function frame(t) {
   const vw = canvas.width, vh = canvas.height;
   if (!world) { ctx.fillStyle = "#6aa7ff"; ctx.fillRect(0, 0, vw, vh); return; }       // still waiting for the server
 
-  pl.update(dt, input);
-  const z = zoomPx();
-  const cx = pl.x + Player.PW / 2, cy = pl.y + Player.PH / 2, k = 1 - Math.exp(-9 * dt);
+  pl.update(dt, buildInput());
+  const z = zoomPx(), py = pl.standY();                                 // py: top of a standing body with my feet (what is drawn and what the camera follows)
+  const cx = pl.x + Player.PW / 2, cy = py + Player.PH / 2, k = 1 - Math.exp(-9 * dt);
   camX += (cx - camX) * k; camY += (cy - camY) * k;
   const hw = vw / z / 2, hh = vh / z / 2;
   camX = Math.min(Math.max(camX, hw), Math.max(hw, World.W - hw));
@@ -1439,9 +1620,11 @@ function frame(t) {
     ctx.fillStyle = "#fff"; ctx.fillText(r.name, sx + s / 2, sy - 6);
   }
 
-  const sx = Math.round(vw / 2 + (pl.x - camX) * z), sy = Math.round(vh / 2 + (pl.y - camY) * z);
-  Character.update(me.ch, dt, { vx: pl.vx, vy: pl.vy, onGround: pl.onGround, talking: me.speaking });
+  const sx = Math.round(vw / 2 + (pl.x - camX) * z), sy = Math.round(vh / 2 + (py - camY) * z);
+  Character.update(me.ch, dt, { vx: pl.vx, vy: pl.vy, onGround: pl.onGround, talking: me.speaking, crouch: pl.crouching });
+  if (pl.ghost) ctx.globalAlpha = 0.55;                                  // a see-through ghost
   Character.draw(ctx, me.ch, sx, sy, z, me.pal);
+  ctx.globalAlpha = 1;
   if (me.speaking) ring(sx, sy, s, bh, lw);
 
   // break puffs
@@ -1455,6 +1638,8 @@ function frame(t) {
   }
   ctx.globalAlpha = 1;
 
+  if (ghost) Joystick.drawRound(ctx, round, dpr); else Joystick.drawFlat(ctx, flat, dpr);
+
   if (aim.down || aim.hover) {
     const [tx, ty] = aimTile();
     const ox = Math.round(vw / 2 + (tx - camX) * z), oy = Math.round(vh / 2 + (ty - camY) * z), ts = Math.round(z);
@@ -1466,7 +1651,7 @@ function frame(t) {
   frames++;
   if (t - fpsT > 500) {
     fps = Math.round(frames * 1000 / (t - fpsT)); frames = 0; fpsT = t;
-    $("hud").textContent = `${remotes.size + 1} here · ${fps} fps\nx ${pl.x.toFixed(0)}  y ${pl.y.toFixed(0)}\ndepth ${(pl.y + Player.PH - world.surfaceY(pl.x)).toFixed(0)}\n${mode}/${layer === World.FRONT ? "front" : "back"}/${World.NAMES[PLACE[slot]]}`;
+    $("hud").textContent = `${remotes.size + 1} here · ${fps} fps\nx ${pl.x.toFixed(0)}  y ${pl.y.toFixed(0)}\ndepth ${(pl.y + pl.h - world.surfaceY(pl.x)).toFixed(0)}${ghost ? " 👻" : ""}\n${mode}/${layer === World.FRONT ? "front" : "back"}/${World.NAMES[PLACE[slot]]}`;
   }
 }
 </script>
