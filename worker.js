@@ -25,7 +25,7 @@
 //     { t:"init", id, seed, spawnX, players:{id:{name,x,y}}, more, edits:[x,y,l,b, x,y,l,b, …] }
 //     { t:"eb", edits:[…] }          `more` further slices of the edit list, sent straight after init
 //     { t:"+", id, name, x, y }     someone joined        { t:"-", id }    someone left
-//     { t:"p", id, x, y }           someone moved         { t:"e", x, y, l, b }   an accepted edit
+//     { t:"p", id, x, y }           someone moved         { t:"e", x, y, l, b, by }   an accepted edit, `by` = who made it
 //
 //  SAVING (step 7). The edit list is kept in Durable Object storage, grouped by 32×32 chunk
 //  (key "c:<cx>:<cy>" → flat [x,y,l,b,…]), plus {seed} under "meta". Changed chunks are written
@@ -45,6 +45,7 @@ const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 // World limits. MUST match world.js (W, H) and edit.js (LOCKED_ROWS).
 const W = 10016, H = 2016;
 const LOCKED_ROWS = 4;        // bottom rows can never be edited
+const BODY_CX = 0.3, BODY_CY = 0.9;   // centre of the player's 0.6 × 1.8 box. MUST match player.js (PW/2, PH/2)
 const MAX_BLOCK = 6;          // 0 = removed, 1..6 = grass dirt stone coal iron gold; 7 (bedrock) is never placeable
 const EDIT_REACH = 9;         // tiles. Clients enforce 5.5; this is the slack for lag
 const EDIT_RATE = 40;         // edits per second a player may sustain …
@@ -258,7 +259,7 @@ export class GameRoom {
       try { m = JSON.parse(raw); } catch (_) { return; }
       if (!m || typeof m !== "object") return;
       if (m.t === "p") this.onPosition(id, p, m);
-      else if (m.t === "e") this.onEdit(p, m);
+      else if (m.t === "e") this.onEdit(id, p, m);
     });
 
     const drop = () => {
@@ -282,14 +283,14 @@ export class GameRoom {
     this.broadcast({ t: "p", id, x: p.x, y: p.y }, id);
   }
 
-  onEdit(p, m) {
+  onEdit(id, p, m) {
     const { x, y, l, b } = m;
     if (p.y === null) return;                                                   // no position yet: can't judge reach
     if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(l) || !Number.isInteger(b)) return;
     if (x < 0 || x >= W || y < 0 || y >= H - LOCKED_ROWS) return;              // outside the world / bedrock rows
     if (l !== 0 && l !== 1) return;
     if (b < 0 || b > MAX_BLOCK) return;
-    if (Math.hypot(x + 0.5 - (p.x + 0.45), y + 0.5 - (p.y + 0.45)) > EDIT_REACH) return;
+    if (Math.hypot(x + 0.5 - (p.x + BODY_CX), y + 0.5 - (p.y + BODY_CY)) > EDIT_REACH) return;
     const now = Date.now();                                                     // token bucket
     p.tokens = Math.min(EDIT_BURST, p.tokens + ((now - p.tokenT) / 1000) * EDIT_RATE);
     p.tokenT = now;
@@ -299,7 +300,7 @@ export class GameRoom {
     const key = (y * W + x) * 2 + l;
     if (this.edits.get(key) === b) return;                                      // nothing new
     this.remember(key, b, true);
-    this.broadcast({ t: "e", x, y, l, b });                                     // everyone, sender included
+    this.broadcast({ t: "e", x, y, l, b, by: id });                             // everyone, sender included; `by` lets friends animate the swing
   }
 
   flatEdits() {

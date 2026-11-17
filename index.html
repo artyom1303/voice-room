@@ -285,8 +285,10 @@
 //  Plain <script> (global `Textures`) or Node (for tests).
 //
 //  Atlas layout:  one tile per block id, left to right.
-//                 row 0 = FRONT layer, row 1 = BACK layer (same tiles, darker)
-//                 source rect for a tile:  x = id * S,  y = layer * S,  size S × S
+//                 row 2v = FRONT layer, row 2v+1 = BACK layer (same tile, darker) for variant v = 0..V-1
+//                 source rect for a tile:  x = id * S,  y = (variant * 2 + layer) * S,  size S × S
+//                 Variant 0 is the original look. The renderer picks a variant from the tile's position, so a
+//                 long vein or a flat wall doesn't show the same 16×16 pattern over and over.
 //  Block order must match World ids: air, grass, dirt, stone, coal, iron, gold, bedrock.
 // ═══════════════════════════════════════════════════════════════
 (function (root, factory) {
@@ -299,6 +301,7 @@
   const NAMES = ["air", "grass", "dirt", "stone", "coal", "iron", "gold", "bedrock"];
   const N = NAMES.length;
   const BACK_DARK = 0.5;                      // back-layer brightness multiplier
+  const V = 4;                                // texture variants per block
 
   const DIRT = [134, 96, 67], GRASS = [92, 158, 52], STONE = [128, 128, 128], BED = [48, 48, 54];
   const COAL = [28, 28, 30], IRON = [214, 168, 138], GOLD = [250, 214, 52];
@@ -331,11 +334,11 @@
     return m;
   }
 
-  // RGBA pixels (Uint8ClampedArray, S*S*4) of one front-layer tile
-  function tilePixels(id) {
-    const out = new Uint8ClampedArray(S * S * 4);
+  // RGBA pixels (Uint8ClampedArray, S*S*4) of one front-layer tile. variant 0 = the original look.
+  function tilePixels(id, variant) {
+    const v = variant | 0, out = new Uint8ClampedArray(S * S * 4);
     if (id === 0) return out;                               // air: fully transparent
-    const seed = 1000 + id * 97;
+    const seed = 1000 + id * 97 + v * 7919, stoneSeed = STONE_SEED + v * 104729;
     const ore = id === 4 ? spots(seed, 5) : id === 5 ? spots(seed, 4) : id === 6 ? spots(seed, 3) : null;
     const oreCol = id === 4 ? COAL : id === 5 ? IRON : GOLD;
     for (let y = 0; y < S; y++) {
@@ -347,7 +350,7 @@
         } else if (id === 2) c = shade(DIRT, grain(x, y, seed, 44));
         else if (id === 7) c = shade(BED, grain(x, y, seed, 60));
         else {                                              // stone and ores
-          c = shade(STONE, grain(x, y, STONE_SEED, 40));
+          c = shade(STONE, grain(x, y, stoneSeed, 40));
           if (ore && ore[y * S + x]) c = shade(oreCol, grain(x, y, seed, 24));
         }
         const i = (y * S + x) * 4;
@@ -358,8 +361,8 @@
   }
 
   // same tile, darkened: this is what a block looks like in the back layer
-  function backPixels(id) {
-    const p = tilePixels(id);
+  function backPixels(id, variant) {
+    const p = tilePixels(id, variant);
     for (let i = 0; i < p.length; i += 4) {
       p[i] = Math.round(p[i] * BACK_DARK); p[i + 1] = Math.round(p[i + 1] * BACK_DARK); p[i + 2] = Math.round(p[i + 2] * BACK_DARK);
     }
@@ -368,18 +371,19 @@
 
   // browser (or worker): bake everything into one atlas canvas
   function build() {
-    const w = S * N, h = S * 2;
+    const w = S * N, h = S * 2 * V;
     const canvas = typeof document !== "undefined"
       ? Object.assign(document.createElement("canvas"), { width: w, height: h })
       : new OffscreenCanvas(w, h);
     const ctx = canvas.getContext("2d");
-    for (let layer = 0; layer < 2; layer++)
-      for (let id = 0; id < N; id++)
-        ctx.putImageData(new ImageData(layer ? backPixels(id) : tilePixels(id), S, S), id * S, layer * S);
-    return { canvas, S, N };
+    for (let v = 0; v < V; v++)
+      for (let layer = 0; layer < 2; layer++)
+        for (let id = 0; id < N; id++)
+          ctx.putImageData(new ImageData(layer ? backPixels(id, v) : tilePixels(id, v), S, S), id * S, (v * 2 + layer) * S);
+    return { canvas, S, N, V };
   }
 
-  return { S, N, NAMES, BACK_DARK, tilePixels, backPixels, build };
+  return { S, N, V, NAMES, BACK_DARK, tilePixels, backPixels, build };
 });
 </script>
 <script>
@@ -438,6 +442,13 @@
     const cache = new Map();                         // key -> { cx, cy, empty, cv, ctx }  (Map order = least recently used first)
     const stats = { built: 0, drawn: 0, cached: 0, evicted: 0 };
     const key = (cx, cy) => cy * CX + cx;
+    const V = atlas.V || 1;                          // texture variants per block (atlas row = variant * 2 + layer)
+    function variant(x, y) {                         // which look this tile gets: fixed by position, so every client agrees
+      if (V === 1) return 0;
+      let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1);
+      h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+      return ((h ^ (h >>> 13)) >>> 16) % V;
+    }
 
     function isEmpty(c) {
       for (let i = 0; i < c.front.length; i++) if (c.front[i] | c.back[i]) return false;
@@ -447,7 +458,7 @@
     // paint one tile into its chunk canvas (the caller clears it first when repainting)
     function paint(e, c, lx, ly) {
       const i = ly * CH + lx, f = c.front[i], id = f || c.back[i];     // front blocks are opaque: skip the wall behind them
-      if (id) e.ctx.drawImage(atlas.canvas, id * S, f ? 0 : S, S, S, lx * S, ly * S, S, S);
+      if (id) e.ctx.drawImage(atlas.canvas, id * S, (variant(e.cx * CH + lx, e.cy * CH + ly) * 2 + (f ? 0 : 1)) * S, S, S, lx * S, ly * S, S, S);
       else if (e.cy * CH + ly >= world.surfaceY(e.cx * CH + lx)) {     // hole below ground: dark void, not sky
         e.ctx.fillStyle = VOID;
         e.ctx.fillRect(lx * S, ly * S, S, S);
@@ -471,7 +482,7 @@
         for (let lx = 0; lx < CH; lx++) {
           const i = ly * CH + lx, f = c.front[i], id = f || c.back[i], d0 = ly * S * N + lx * S;
           if (id) {
-            const s0 = (f ? 0 : S) * aw + id * S;
+            const s0 = (variant(e.cx * CH + lx, e.cy * CH + ly) * 2 + (f ? 0 : 1)) * S * aw + id * S;
             for (let r = 0; r < S; r++) { const s1 = s0 + r * aw, d1 = d0 + r * N; for (let k = 0; k < S; k++) dst[d1 + k] = px[s1 + k]; }
           } else if (e.cy * CH + ly >= world.surfaceY(e.cx * CH + lx)) {
             for (let r = 0; r < S; r++) { const d1 = d0 + r * N; for (let k = 0; k < S; k++) dst[d1 + k] = VOID32; }
@@ -565,8 +576,8 @@
 // ═══════════════════════════════════════════════════════════════
 //  player.js — player physics against the block world  (step 4)
 //
-//  The player is a 0.9 × 0.9 tile square, so it fits through 1-wide
-//  tunnels. Position (x, y) is the top-left corner, in tiles, y DOWN.
+//  The player is a 0.6 wide × 1.8 tall box (a human: tunnels must be 2 high
+//  and at least 1 wide to walk through). Position (x, y) is the top-left corner, in tiles, y DOWN.
 //  Collision is against the FRONT layer only (the back wall is scenery).
 //
 //  Moves one axis at a time in steps of at most 0.25 tile, so even at
@@ -584,7 +595,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const PW = 0.9, PH = 0.9;       // size in tiles
+  const PW = 0.6, PH = 1.8;       // size in tiles. worker.js reaches from the body centre (PW/2, PH/2): keep both in step
   const SPD = 6;                  // walk speed, tiles/s
   const G = 32;                   // gravity, tiles/s²
   const JUMP = 13.5;              // jump speed -> apex ≈ 2.85 tiles (clears a 2-block step)
@@ -659,6 +670,180 @@
   }
 
   return { create, PW, PH, SPD, G, JUMP, MAXFALL };
+});
+</script>
+<script>
+/* ═══ character.js ═══ */
+// ═══════════════════════════════════════════════════════════════
+//  character.js — the animated human  (step 10)
+//
+//  A pixel-art person drawn from rectangles, in profile, 29 art-pixels tall = 1.8 tiles (the size of the
+//  player's collision box, 0.6 × 1.8). No images, no DOM: only a 2D context is needed.
+//
+//    const c = Character.create();                              // one per person (me and every friend)
+//    Character.update(c, dt, { vx, vy, onGround, talking });    // every frame: velocities in tiles/s
+//    Character.act(c, "mine" | "place", dx, dy, colour);        // swing at a tile dx,dy tiles away (from the body centre)
+//    Character.draw(ctx, c, x, y, zoom, Character.palette(id)); // x,y = top-left of the collision box, in canvas px
+//
+//  Poses: idle (breathing, blinking), walk (leg and arm swing, bounce), jump / fall (arms up / out),
+//  landing squash, mine (wind-up, strike, recover, with a pickaxe), place (arm reaches out holding a block),
+//  talking (mouth moves). Facing follows movement, or the target while acting.
+//
+//  Plain <script> (global `Character`) or Node (tests use a recording context).
+// ═══════════════════════════════════════════════════════════════
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.Character = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  const BOX_W = 0.6, BOX_H = 1.8;                 // collision box, tiles (must match player.js PW, PH)
+  const LAND_T = 0.16;                            // landing squash duration, s
+  const MINE_T = 0.32, PLACE_T = 0.26;            // action durations, s
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, k) => a + (b - a) * k;
+  const easeOut = (k) => 1 - (1 - k) * (1 - k);
+  const easeInOut = (k) => (k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) * (1 - k));
+  const rgb = (c, k) => `rgb(${Math.round(clamp(c[0] * (k || 1), 0, 255))},${Math.round(clamp(c[1] * (k || 1), 0, 255))},${Math.round(clamp(c[2] * (k || 1), 0, 255))})`;
+
+  // ── look: skin, hair, shirt and trousers come from the player's id, so everyone is recognisable and every client agrees
+  const SKIN = [[255, 219, 172], [241, 194, 125], [224, 172, 105], [198, 134, 66], [141, 85, 36], [96, 58, 30]];
+  const HAIR = [[40, 28, 20], [92, 58, 30], [158, 98, 40], [226, 186, 90], [196, 66, 40], [120, 120, 130], [24, 24, 30]];
+  const PANTS = [[52, 62, 110], [70, 52, 40], [48, 72, 64], [60, 60, 70], [92, 56, 84]];
+  function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  function hsl(h, s, l) {                                   // → [r,g,b]
+    s /= 100; l /= 100; const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0) * 255, f(8) * 255, f(4) * 255];
+  }
+  function palette(id) {
+    const h = hashStr(String(id));
+    return {
+      skin: SKIN[h % SKIN.length], hair: HAIR[(h >>> 4) % HAIR.length], pants: PANTS[(h >>> 9) % PANTS.length],
+      shirt: hsl((h >>> 13) % 360, 62, 52), shoe: [34, 30, 36], eye: [24, 24, 32], hairStyle: (h >>> 20) % 3,
+    };
+  }
+
+  // ── animation state ───────────────────────────────────────────
+  function create(opts) {
+    return {
+      face: 1, t: 0, phase: 0, walkW: 0, airW: 0, vy: 0, wasAir: false, prevVy: 0, land: 0, landAmp: 0,
+      act: null, toolT: 0, talking: false, blink: 0, blinkIn: 1.5 + ((opts && opts.rand ? opts.rand() : Math.random()) * 2.5),
+      rand: (opts && opts.rand) || Math.random,
+    };
+  }
+
+  function update(st, dt, m) {
+    dt = clamp(dt, 0, 0.1);
+    st.t += dt;
+    const sp = Math.abs(m.vx || 0), onGround = !!m.onGround, walking = onGround && sp > 0.3;
+    if (sp > 0.3 && !st.act) st.face = m.vx > 0 ? 1 : -1;                 // turn to walk, but keep facing the work while acting
+    st.walkW += ((walking ? 1 : 0) - st.walkW) * (1 - Math.exp(-16 * dt));
+    st.airW += ((onGround ? 0 : 1) - st.airW) * (1 - Math.exp(-20 * dt));
+    if (walking) st.phase = (st.phase + sp * dt * 1.9) % (Math.PI * 2);
+    st.vy = m.vy || 0;
+    if (st.wasAir && onGround && st.prevVy > 6) { st.land = LAND_T; st.landAmp = clamp(st.prevVy / 30, 0.3, 1); }
+    st.wasAir = !onGround; if (!onGround) st.prevVy = st.vy;
+    st.land = Math.max(0, st.land - dt);
+    if (st.act) { st.act.t += dt; if (st.act.t >= st.act.dur) { st.toolT = st.act.kind === "mine" ? 0.35 : 0; st.act = null; } }   // only a pickaxe lingers in the hand
+    else if (st.toolT > 0) st.toolT = Math.max(0, st.toolT - dt);
+    st.talking = !!m.talking;
+    if (st.blink > 0) st.blink = Math.max(0, st.blink - dt);
+    else { st.blinkIn -= dt; if (st.blinkIn <= 0) { st.blink = 0.12; st.blinkIn = 2.2 + st.rand() * 3; } }
+  }
+
+  // swing at a tile (dx, dy) = target centre minus body centre, in tiles. kind: "mine" | "place". colour: block colour in the hand.
+  function act(st, kind, dx, dy, colour) {
+    if (Math.abs(dx) > 0.25) st.face = dx > 0 ? 1 : -1;
+    const aim = Math.atan2(dx * st.face, dy);                              // 0 = straight down, π/2 = straight ahead, π = straight up
+    st.act = { kind, aim, t: 0, dur: kind === "mine" ? MINE_T : PLACE_T, colour: colour || null };
+    st.toolT = 0;
+  }
+
+  // joint angles for this instant (radians, 0 = hanging down, positive = swung forward), plus body offsets
+  function pose(st) {
+    const sinP = Math.sin(st.phase), breathe = Math.sin(st.t * 2.2), w = st.walkW, a = st.airW;
+    // standing
+    let bob = breathe * 0.35, lean = 0, legF = 0, legB = 0, armF = 0.06 + breathe * 0.03, armB = -0.06 - breathe * 0.03;
+    // walking
+    bob = lerp(bob, -Math.abs(sinP) * 0.9, w); lean = lerp(lean, 0.06, w);
+    legF = lerp(legF, sinP * 0.85, w); legB = lerp(legB, -sinP * 0.85, w);
+    armF = lerp(armF, -sinP * 0.75, w); armB = lerp(armB, sinP * 0.75, w);
+    // in the air: rising (arms up, one knee forward) → falling (arms out)
+    const f = clamp((st.vy + 6) / 12, 0, 1);                                // 0 = rising, 1 = falling
+    bob = lerp(bob, 0, a); lean = lerp(lean, lerp(0.08, 0.03, f), a);
+    legF = lerp(legF, lerp(0.75, 0.25, f), a); legB = lerp(legB, lerp(-0.2, -0.3, f), a);
+    armF = lerp(armF, lerp(2.3, 1.25, f), a); armB = lerp(armB, lerp(1.7, -1.0, f), a);
+    // landing squash
+    const sq = st.land > 0 ? (st.land / LAND_T) * st.landAmp : 0;
+    const squashY = 1 - 0.14 * sq, squashX = 1 + 0.10 * sq;
+    if (sq > 0) { legF += 0.35 * sq; legB -= 0.35 * sq; }
+    // actions override the front arm
+    let tool = null, toolColour = null;
+    if (st.act) {
+      const A = st.act, p = clamp(A.t / A.dur, 0, 1), rest = armF;
+      if (A.kind === "mine") {
+        if (p < 0.35) { const k = easeInOut(p / 0.35); armF = lerp(rest, A.aim - 1.55, k); lean = lerp(lean, -0.05, k); }          // wind up
+        else if (p < 0.7) { const k = easeOut((p - 0.35) / 0.35); armF = lerp(A.aim - 1.55, A.aim + 0.15, k); lean = lerp(-0.05, 0.12, k); }   // strike
+        else { const k = easeInOut((p - 0.7) / 0.3); armF = lerp(A.aim + 0.15, rest, k); lean = lerp(0.12, lean, k); }                // recover
+        tool = "pick";
+      } else {
+        const k = p < 0.5 ? easeOut(p / 0.5) : 1 - easeInOut((p - 0.5) / 0.5);
+        armF = lerp(rest, A.aim, k); lean = lerp(lean, 0.06, k);
+        tool = "block"; toolColour = A.colour;
+      }
+    } else if (st.toolT > 0) tool = "pick";                                // keeps the pickaxe in hand a moment after mining
+    return { bob, lean, legF, legB, armF, armB, squashX, squashY, tool, toolColour, blink: st.blink > 0, mouthOpen: st.talking && Math.sin(st.t * 30) > 0 };
+  }
+
+  // ── drawing ───────────────────────────────────────────────────
+  // x, y: top-left of the collision box in canvas px; zoom: canvas px per tile. Feet land exactly on the box bottom.
+  function draw(ctx, st, x, y, zoom, pal) {
+    const p = pose(st), u = zoom / 16, bw = BOX_W * zoom, bh = BOX_H * zoom;
+    const skin = rgb(pal.skin), skinD = rgb(pal.skin, 0.82), hair = rgb(pal.hair), hairD = rgb(pal.hair, 0.8);
+    const shirt = rgb(pal.shirt), shirtD = rgb(pal.shirt, 0.78), pants = rgb(pal.pants), pantsD = rgb(pal.pants, 0.78), shoe = rgb(pal.shoe);
+    const rect = (c, rx, ry, rw, rh) => { ctx.fillStyle = c; ctx.fillRect(rx, ry, rw, rh); };
+    const limb = (px, py, ang, fn) => { ctx.save(); ctx.translate(px, py); ctx.rotate(-ang); fn(); ctx.restore(); };
+
+    ctx.save();
+    ctx.translate(Math.round(x + bw / 2), Math.round(y + bh));            // origin: feet, centre of the box
+    ctx.scale(st.face * u * p.squashX, u * p.squashY);                    // art-pixel units; mirrored when facing left
+    ctx.translate(0, 0);
+    const bob = p.bob;
+
+    // back arm and back leg (darker, behind the torso)
+    limb(0, -19.5 + bob, p.armB, () => { rect(shirtD, -1.5, 0, 3, 6); rect(skinD, -1.5, 6, 3, 3.5); });
+    limb(0, -10, p.legB, () => { rect(pantsD, -1.5, 0, 3, 7.5); rect(shoe, -1.5, 7.5, 4, 2.5); });
+
+    // torso (leans a little with movement), then the head on top of it
+    ctx.save(); ctx.translate(0, -10 + bob * 0.5); ctx.rotate(-p.lean); ctx.translate(0, 10 - bob * 0.5);
+    rect(shirt, -3, -21 + bob, 6, 11);
+    rect(shirtD, -3, -12 + bob, 6, 1);                                    // hem
+    rect(rgb(pal.pants, 0.9), -3, -11 + bob, 6, 1.2);                     // belt line / waist
+    // head: hair at the back and on top, face and a nose at the front, one eye
+    rect(skin, -4, -29 + bob, 8, 8);
+    rect(skin, 4, -25 + bob, 1, 1.6);                                     // nose
+    rect(hair, -4, -29 + bob, 8, 3);                                      // top of the hair
+    rect(hair, -4, -26 + bob, 3, p.blink ? 4 : 5);                        // back of the hair
+    if (pal.hairStyle === 1) rect(hairD, -5, -25 + bob, 2, 4);           // ponytail
+    if (pal.hairStyle === 2) rect(hairD, 2, -29 + bob, 3, 2);            // fringe over the forehead
+    if (p.blink) rect(rgb(pal.eye), 1.2, -24.5 + bob, 2.2, 0.8);         // closed eye
+    else { rect("rgb(255,255,255)", 1, -25.5 + bob, 2.4, 2.2); rect(rgb(pal.eye), 2.2, -25.2 + bob, 1.2, 1.8); }
+    if (p.mouthOpen) rect("rgb(120,40,44)", 2.2, -22.6 + bob, 2, 1.2); else rect(skinD, 2.4, -22.4 + bob, 1.6, 0.6);
+    ctx.restore();
+
+    // front leg, shoes extend a pixel forward
+    limb(0, -10, p.legF, () => { rect(pants, -1.5, 0, 3, 7.5); rect(shoe, -1.5, 7.5, 4, 2.5); });
+
+    // front arm, last so it is in front of the body; carries the pickaxe or a block
+    limb(0, -19.5 + bob, p.armF, () => {
+      rect(shirt, -1.5, 0, 3, 6); rect(skin, -1.5, 6, 3, 3.5);
+      if (p.tool === "pick") { rect("rgb(120,84,48)", -0.5, 7, 1, 8); rect("rgb(170,176,186)", -3.5, 14, 7, 2); rect("rgb(120,126,138)", -3.5, 15.2, 7, 0.8); }
+      else if (p.tool === "block") { rect(p.toolColour ? rgb(p.toolColour) : "rgb(134,96,67)", -1.5, 8.5, 4, 4); rect("rgba(0,0,0,.25)", -1.5, 11.5, 4, 1); }
+    });
+    ctx.restore();
+  }
+
+  return { BOX_W, BOX_H, LAND_T, MINE_T, PLACE_T, create, update, act, pose, draw, palette };
 });
 </script>
 <script>
@@ -824,7 +1009,7 @@
         case "+": emit("join", { id: m.id, name: m.name, x: m.x, y: m.y }); break;
         case "-": emit("leave", m.id); break;
         case "p": emit("pos", { id: m.id, x: m.x, y: m.y }); break;
-        case "e": emit("edit", { x: m.x, y: m.y, l: m.l, b: m.b }); break;
+        case "e": emit("edit", { x: m.x, y: m.y, l: m.l, b: m.b, by: m.by }); break;
       }
     }
 
@@ -885,6 +1070,7 @@ let world = null, R = null, pl = null, Ed = null;            // created when the
 let running = false, rafId = 0, lastSpawned = false;
 const atlas = Textures.build();
 const remotes = new Map();                                    // id -> { name, x, y, dx, dy }  (dx,dy = smoothed draw position)
+const me = { speaking: false, ch: null, pal: null };            // my own character: animation state + look (made when the world is)
 const pending = new Map();                                    // my edits the server hasn't echoed yet: key -> { x, y, l, from, t }
 const input = { left: false, right: false, jump: false };
 const timers = [];
@@ -1022,8 +1208,9 @@ function onInit(m) {
     R = Renderer.create({ world, atlas });
     pl = Player.create(world);
     Ed = Edit.create({ world, player: pl, renderer: R });
-    window.__world = world; window.__pl = pl; window.__ed = Ed; window.__R = R;
-    pl.spawn(m.spawnX); camX = pl.x + 0.45; camY = pl.y + 0.45;
+    me.ch = Character.create(); me.pal = Character.palette(myId);
+    window.__world = world; window.__pl = pl; window.__ed = Ed; window.__R = R; window.__me = me;
+    pl.spawn(m.spawnX); camX = pl.x + Player.PW / 2; camY = pl.y + Player.PH / 2;
     refreshUI();
     toast("Tap blocks to mine. Pick a block below to build.", 3000);
   } else { world.reset(); R.clear(); }                          // reconnect: rebuild from the full edit list so nothing can drift
@@ -1042,17 +1229,33 @@ function onEditSlice(m) {
 function onJoin(m) {
   if (m.id === myId) return;
   const ok = m.y !== null && m.y !== undefined;
-  remotes.set(m.id, { name: m.name, x: m.x, y: ok ? m.y : null, dx: m.x, dy: ok ? m.y : null });
+  remotes.set(m.id, { name: m.name, x: m.x, y: ok ? m.y : null, dx: m.x, dy: ok ? m.y : null, ch: Character.create(), pal: Character.palette(m.id) });
 }
 function onPos(m) {
   const r = remotes.get(m.id); if (!r) return;
   if (r.y === null) { r.dx = m.x; r.dy = m.y; }
   r.x = m.x; r.y = m.y;
 }
+// little puffs of block-coloured specks when something breaks (purely visual, never sent anywhere)
+const BLOCK_COL = [null, [92, 158, 52], [134, 96, 67], [128, 128, 128], [60, 60, 64], [214, 168, 138], [250, 214, 52], [48, 48, 54]];
+const particles = [];
+function puff(x, y, id, back) {
+  const c = BLOCK_COL[id]; if (!c || particles.length > 240) return;
+  window.__puffs = (window.__puffs || 0) + 1;                   // (test hook)
+  const k = back ? 0.5 : 1, col = `rgb(${c[0] * k | 0},${c[1] * k | 0},${c[2] * k | 0})`;
+  for (let i = 0; i < 8; i++) particles.push({ x: x + 0.2 + Math.random() * 0.6, y: y + 0.2 + Math.random() * 0.6, vx: (Math.random() - 0.5) * 5, vy: -1 - Math.random() * 3, life: 0.45 + Math.random() * 0.25, col });
+}
 function onRemoteEdit(m) {                                      // every accepted edit comes back here, mine included
   if (!world) return;
   pending.delete((m.y * World.W + m.x) * 2 + m.l);
-  if (world.getTile(m.x, m.y, m.l) !== m.b) { world.setTile(m.x, m.y, m.l, m.b); R.tileChanged(m.x, m.y); }
+  const old = world.getTile(m.x, m.y, m.l);
+  if (old !== m.b) {
+    world.setTile(m.x, m.y, m.l, m.b); R.tileChanged(m.x, m.y);
+    if (m.b === 0 && old !== 0) puff(m.x, m.y, old, m.l === 1);   // (my own breaks were applied locally already, so they never get here a second time)
+    const who = m.by && m.by !== myId ? remotes.get(m.by) : null;  // a friend's swing: show them mining or placing
+    if (who && who.y !== null) window.__swings = (window.__swings || 0) + 1;                      // (test hook)
+    if (who && who.y !== null) Character.act(who.ch, m.b === 0 ? "mine" : "place", m.x + 0.5 - (who.dx + Player.PW / 2), m.y + 0.5 - (who.dy + Player.PH / 2), BLOCK_COL[m.b]);
+  }
 }
 function expirePending() {                                      // the server silently refuses some edits; undo those after 3 s
   const now = performance.now();
@@ -1077,8 +1280,10 @@ function updateVoice() {
   if (!lkRoom || !pl) return;
   const parts = lkRoom.remoteParticipants || lkRoom.participants;      // Map in v2 (older builds: participants)
   if (!parts) return;
+  me.speaking = !muted && !!(lkRoom.localParticipant && lkRoom.localParticipant.isSpeaking);
   for (const p of parts.values()) {
     const r = remotes.get(p.identity);
+    if (r) r.speaking = !!p.isSpeaking;
     const d = r && r.y !== null ? Math.hypot(r.dx - pl.x, r.dy - pl.y) : Infinity;
     const v = volumeFor(d);
     window.__volumes[p.identity] = v;
@@ -1089,12 +1294,12 @@ function updateVoice() {
 
 // ── camera / zoom ───────────────────────────────────────────────
 const ZOOMS = [12, 16, 24, 32, 48];
-let zi = ZOOMS.findIndex((z) => z >= innerWidth / 22); if (zi < 0) zi = 2;
+let zi = ZOOMS.findIndex((z) => z >= innerWidth / 16); if (zi < 0) zi = 3;      // roughly 16 tiles across: a 1.8-tall person reads well
 const zoomPx = () => ZOOMS[zi] * dpr;
 $("zi").onclick = () => { zi = Math.min(ZOOMS.length - 1, zi + 1); };
 $("zo").onclick = () => { zi = Math.max(0, zi - 1); };
 let camX = 0, camY = 0;
-$("resp").onclick = () => { if (pl) { pl.spawn(Math.floor(pl.x)); camX = pl.x + 0.45; camY = pl.y + 0.45; sendPos(); } };   // lift yourself out of a pit
+$("resp").onclick = () => { if (pl) { pl.spawn(Math.floor(pl.x)); camX = pl.x + Player.PW / 2; camY = pl.y + Player.PH / 2; sendPos(); } };   // lift yourself out of a pit
 
 // ── build state: what a tap does ────────────────────────────────
 let mode = "mine", layer = World.FRONT, slot = 0;
@@ -1138,6 +1343,9 @@ function act(announce) {
     if (announce) toast(Edit.MESSAGES[r.reason] + (r.reason === "empty" && layer === World.FRONT ? " (try Back)" : ""));
     return;
   }
+  if (r.to === 0) puff(r.x, r.y, r.from, r.layer === 1);
+  if (!me.ch.act || me.ch.act.t > me.ch.act.dur * 0.55)       // swing the arm (while holding the button, start the next swing once this one is mostly done)
+    Character.act(me.ch, r.to === 0 ? "mine" : "place", r.x + 0.5 - (pl.x + Player.PW / 2), r.y + 0.5 - (pl.y + Player.PH / 2), BLOCK_COL[r.to]);
   const key = (r.y * World.W + r.x) * 2 + r.layer;
   if (!pending.has(key)) pending.set(key, { x: r.x, y: r.y, l: r.layer, from: r.from, t: performance.now() });
   else pending.get(key).t = performance.now();
@@ -1181,6 +1389,12 @@ document.addEventListener("contextmenu", (e) => e.preventDefault());
 window.__tileToClient = (tx, ty) => { const z = zoomPx(); return [(canvas.width / 2 + (tx + 0.5 - camX) * z) / dpr, (canvas.height / 2 + (ty + 0.5 - camY) * z) / dpr]; };
 window.__remotes = remotes; window.__pending = pending;
 
+// a green ring around anyone who is talking (drawn around the character's whole collision box)
+function ring(sx, sy, w, h, lw) {
+  ctx.strokeStyle = "#4cff8a"; ctx.lineWidth = Math.max(2, lw * 1.2);
+  ctx.strokeRect(sx - lw * 1.5, sy - lw * 1.5, w + lw * 3, h + lw * 3);
+}
+
 // ── loop ────────────────────────────────────────────────────────
 let last = 0, frames = 0, fpsT = performance.now(), fps = 0, worst = 0;
 function frame(t) {
@@ -1204,23 +1418,42 @@ function frame(t) {
 
   R.draw(ctx, camX, camY, vw, vh, z);
 
+  // deeper = darker (players and effects are drawn on top, so they stay bright)
+  const depth = camY - world.surfaceY(camX);
+  if (depth > 8) { ctx.fillStyle = `rgba(0,0,0,${Math.min(0.45, (depth - 8) / 400).toFixed(3)})`; ctx.fillRect(0, 0, vw, vh); }
+
   // other players: glide toward the last position the server told us
-  const s = Math.round(Player.PW * z), lw = Math.max(2, z / 12), sm = 1 - Math.exp(-10 * dt);
+  const s = Math.round(Player.PW * z), bh = Math.round(Player.PH * z), lw = Math.max(2, z / 12), sm = 1 - Math.exp(-10 * dt);
   ctx.font = `600 ${Math.max(10, Math.round(z * 0.36))}px system-ui, sans-serif`; ctx.textAlign = "center";
   for (const [id, r] of remotes) {
     if (r.y === null) continue;
+    const ox = r.dx, oy = r.dy;
     r.dx += (r.x - r.dx) * sm; r.dy += (r.y - r.dy) * sm;
+    const vx = (r.dx - ox) / dt, vy = (r.dy - oy) / dt;               // their speed, worked out from how they glide
+    Character.update(r.ch, dt, { vx, vy, onGround: Math.abs(vy) < 2, talking: r.speaking });
     const sx = Math.round(vw / 2 + (r.dx - camX) * z), sy = Math.round(vh / 2 + (r.dy - camY) * z);
     if (sx < -200 || sy < -200 || sx > vw + 200 || sy > vh + 200) continue;
-    ctx.fillStyle = `hsl(${hue(id)},70%,55%)`; ctx.fillRect(sx, sy, s, s);
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = lw; ctx.strokeRect(sx + lw / 2, sy + lw / 2, s - lw, s - lw);
+    Character.draw(ctx, r.ch, sx, sy, z, r.pal);
+    if (r.speaking) ring(sx, sy, s, bh, lw);
     ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.strokeText(r.name, sx + s / 2, sy - 6);
     ctx.fillStyle = "#fff"; ctx.fillText(r.name, sx + s / 2, sy - 6);
   }
 
   const sx = Math.round(vw / 2 + (pl.x - camX) * z), sy = Math.round(vh / 2 + (pl.y - camY) * z);
-  ctx.fillStyle = "#ff5a7a"; ctx.fillRect(sx, sy, s, s);
-  ctx.strokeStyle = "#fff"; ctx.lineWidth = lw; ctx.strokeRect(sx + lw / 2, sy + lw / 2, s - lw, s - lw);
+  Character.update(me.ch, dt, { vx: pl.vx, vy: pl.vy, onGround: pl.onGround, talking: me.speaking });
+  Character.draw(ctx, me.ch, sx, sy, z, me.pal);
+  if (me.speaking) ring(sx, sy, s, bh, lw);
+
+  // break puffs
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]; p.life -= dt;
+    if (p.life <= 0) { particles[i] = particles[particles.length - 1]; particles.pop(); continue; }
+    p.vy += 16 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    const px = Math.round(vw / 2 + (p.x - camX) * z), py = Math.round(vh / 2 + (p.y - camY) * z), ps = Math.max(2, Math.round(z * 0.12));
+    if (px < -20 || py < -20 || px > vw + 20 || py > vh + 20) continue;
+    ctx.globalAlpha = Math.min(1, p.life * 3); ctx.fillStyle = p.col; ctx.fillRect(px, py, ps, ps);
+  }
+  ctx.globalAlpha = 1;
 
   if (aim.down || aim.hover) {
     const [tx, ty] = aimTile();
@@ -1233,7 +1466,7 @@ function frame(t) {
   frames++;
   if (t - fpsT > 500) {
     fps = Math.round(frames * 1000 / (t - fpsT)); frames = 0; fpsT = t;
-    $("hud").textContent = `${roomName} · ${remotes.size + 1} here · ${fps} fps\nx ${pl.x.toFixed(1)}  y ${pl.y.toFixed(1)}  depth ${(pl.y - world.surfaceY(pl.x)).toFixed(0)}\n${mode} · ${layer === World.FRONT ? "front" : "back"} · ${World.NAMES[PLACE[slot]]}`;
+    $("hud").textContent = `${remotes.size + 1} here · ${fps} fps\nx ${pl.x.toFixed(0)}  y ${pl.y.toFixed(0)}\ndepth ${(pl.y + Player.PH - world.surfaceY(pl.x)).toFixed(0)}\n${mode}/${layer === World.FRONT ? "front" : "back"}/${World.NAMES[PLACE[slot]]}`;
   }
 }
 </script>
