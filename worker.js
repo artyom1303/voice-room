@@ -20,9 +20,10 @@
 //  Client → server (JSON):
 //     { t:"p", x, y }               my position (tiles)
 //     { t:"e", x, y, l, b }         edit: tile (x,y), layer l (0 front / 1 back), block b (0 = removed)
+//     { t:"inv", s:{m,b} }          my inventory (step 14), saved under my TYPED NAME; m = ribbon [[item,count]…≤10], b = backpack or null
 //     { t:"hb" }                    heartbeat, every 5 s
 //  Server → client:
-//     { t:"init", id, seed, spawnX, players:{id:{name,x,y}}, more, edits:[x,y,l,b, x,y,l,b, …] }
+//     { t:"init", id, seed, spawnX, players:{id:{name,x,y}}, inv:{m,b}|null, more, edits:[x,y,l,b, x,y,l,b, …] }
 //     { t:"eb", edits:[…] }          `more` further slices of the edit list, sent straight after init
 //     { t:"+", id, name, x, y }     someone joined        { t:"-", id }    someone left
 //     { t:"p", id, x, y }           someone moved         { t:"e", x, y, l, b, by }   an accepted edit, `by` = who made it
@@ -33,6 +34,15 @@
 //  loads everything BEFORE it accepts a connection, and never writes until that load succeeded, so a
 //  failed load can't overwrite a good save. A failed write keeps the chunk marked dirty and retries.
 //  Worst case (the server dies) you lose the last second of building. Works with KV- or SQLite-backed DOs.
+//
+//  INVENTORIES (step 14). Progress belongs to the typed name, not to the connection: key "i:<name>" (lower-cased,
+//  spaces squeezed) → {m,b}. The page reads it once from `init` and sends the whole inventory back whenever it
+//  changes (about once a second). Anything malformed is ignored; at most MAX_INVS names per room.
+//
+//  TERRAIN VERSION. "meta" also carries w = WORLD_V. When it differs, only the saved edits (c: records) are dropped; inventories stay.
+//
+//  DATA VERSION. "meta" carries v = DATA_V. If the stored version is missing or different, everything stored
+//  for the room is deleted once (deploying step 14 starts every world fresh: "version 0.0").
 // ═══════════════════════════════════════════════════════════════
 
 const CORS = {
@@ -44,13 +54,21 @@ const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 // World limits. MUST match world.js (W, H) and edit.js (LOCKED_ROWS).
 const W = 10016, H = 2016;
+const UNDER = 1500;           // players may fly (ghost mode) this far below the world, into the magma. MUST match world.js UNDER
 const LOCKED_ROWS = 4;        // bottom rows can never be edited
 const BODY_CX = 0.3, BODY_CY = 0.9;   // centre of the player's 0.6 × 1.8 box. MUST match player.js (PW/2, PH/2)
-const MAX_BLOCK = 6;          // 0 = removed, 1..6 = grass dirt stone coal iron gold; 7 (bedrock) is never placeable
+const BEDROCK = 7;            // can never be placed
+const MAX_BLOCK = 10;         // 0 = removed, 1..6 = grass dirt stone coal iron gold; 7 (bedrock) is never placeable; 8..10 = log leaves planks
 const EDIT_REACH = 9;         // tiles. Clients enforce 5.5; this is the slack for lag
 const EDIT_RATE = 40;         // edits per second a player may sustain …
 const EDIT_BURST = 80;        // … with this much burst
 const MAX_MSG = 512;          // client messages are tiny; anything bigger is junk
+const MAX_INV_MSG = 2048;     // ...except an inventory (ribbon + 8×8 backpack)
+const DATA_V = 2;             // saved-data version; a different stored version is wiped on load (step 14 = fresh start)
+const WORLD_V = 3;            // terrain version (step 18: rock layers). A different one drops the saved EDITS only (they would be in the wrong place on new terrain); inventories stay
+const MAX_INVS = 100;         // saved inventories per room (a room is for ≤5 friends; this only stops name spam)
+const INV_BURST = 10, INV_RATE = 2;   // inventory messages per player: 10 at once, 2 per second sustained
+const MAIN_SLOTS = 10, BAG_SLOTS = 64, STACK_MAX = 99, MAX_ITEM_ID = 255;   // MUST match items.js
 const SWEEP_MS = 10000;       // check for dead connections every 10 s
 const STALE_MS = 30000;       // drop anyone silent for 30 s (clients ping every 5 s)
 const FLUSH_MS = 1000;        // save changed chunks this long after the last edit
@@ -89,6 +107,30 @@ function seedFromRoom(room) {
   let h = 0x811c9dc5;
   for (let i = 0; i < room.length; i++) { h ^= room.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return h | 0;
+}
+
+// the key a player's progress is saved under: their typed name, case and spacing ignored
+function nameKey(name) {
+  return String(name || "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 32) || "player";
+}
+// the same rules as Items.sanitize in items.js (ids only need to be in range here: the server doesn't know the item list)
+function cleanInv(raw) {
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.m) || raw.m.length > MAIN_SLOTS) return null;
+  const stack = (s) => {
+    if (!Array.isArray(s) || s.length !== 2) return null;
+    const id = s[0], n = s[1];
+    if (!Number.isInteger(id) || id < 1 || id > MAX_ITEM_ID || !Number.isInteger(n) || n < 1 || n > STACK_MAX) return null;
+    return [id, n];
+  };
+  const m = [];
+  for (const s of raw.m) { const c = stack(s); if (!c) return null; m.push(c); }
+  let b = null;
+  if (raw.b !== null && raw.b !== undefined) {
+    if (!Array.isArray(raw.b) || raw.b.length !== BAG_SLOTS) return null;
+    b = [];
+    for (const s of raw.b) { if (s === null) { b.push(null); continue; } const c = stack(s); if (!c) return null; b.push(c); }
+  }
+  return { m, b };
 }
 
 // ── LiveKit token ───────────────────────────────────────────────
@@ -144,6 +186,9 @@ export class GameRoom {
     this.dirty = new Set();       // chunk ids that changed since they were last saved
     this.flushTimer = null;
     this.flushing = null;         // promise of the write in progress
+    this.invs = new Map();        // name key -> { m, b }  saved inventories
+    this.invDirty = new Set();    // name keys changed since they were last saved
+    this.metaPending = false;     // true while the "meta" record (data version + seed) has still to be written
     this.loadedOk = !this.storage;                               // writes are allowed only after a successful load
     this.loaded = this.storage
       ? (ctx.blockConcurrencyWhile ? ctx.blockConcurrencyWhile(() => this.load()) : this.load())
@@ -153,14 +198,28 @@ export class GameRoom {
   // ── saving ────────────────────────────────────────────────────
   async load() {
     const meta = await this.storage.get("meta");
-    if (meta && Number.isInteger(meta.seed)) this.seed = meta.seed;
+    if (!meta || meta.v !== DATA_V) {                              // old (or no) data version: start the room fresh. Only reached after a successful read.
+      await this.storage.deleteAll();
+      this.loadedOk = true;
+      return;
+    }
+    if (Number.isInteger(meta.seed)) this.seed = meta.seed;
+    const invs = await this.storage.list({ prefix: "i:" });
+    for (const [k, v] of invs) { const c = cleanInv(v); if (c && this.invs.size < MAX_INVS) this.invs.set(k.slice(2), c); }
+    if (meta.w !== WORLD_V) {                                      // terrain changed since this room was saved: forget the old edits, keep who has what
+      const old = [...(await this.storage.list({ prefix: "c:" })).keys()];
+      for (let i = 0; i < old.length; i += 100) await this.storage.delete(old.slice(i, i + 100));
+      this.metaPending = true;                                     // the new terrain version is written before anything else
+      this.loadedOk = true;
+      return;
+    }
     const saved = await this.storage.list({ prefix: "c:" });
     for (const [id, flat] of saved) {
       if (!Array.isArray(flat)) continue;
       for (let i = 0; i + 3 < flat.length; i += 4) {
         const x = flat[i], y = flat[i + 1], l = flat[i + 2], b = flat[i + 3];
         if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x >= W || y < 0 || y >= H - LOCKED_ROWS) continue;
-        if ((l !== 0 && l !== 1) || !Number.isInteger(b) || b < 0 || b > MAX_BLOCK) continue;   // skip anything corrupt
+        if ((l !== 0 && l !== 1) || !Number.isInteger(b) || b < 0 || b > MAX_BLOCK || b === BEDROCK) continue;   // skip anything corrupt
         this.remember((y * W + x) * 2 + l, b, false);
       }
     }
@@ -176,6 +235,8 @@ export class GameRoom {
     if (markDirty) { this.dirty.add(cid); this.scheduleFlush(); }
   }
 
+  hasDirty() { return this.dirty.size > 0 || this.invDirty.size > 0; }
+
   scheduleFlush() {
     if (!this.storage || this.flushTimer) return;
     this.flushTimer = setTimeout(() => { this.flushTimer = null; this.flush(); }, FLUSH_MS);
@@ -187,11 +248,17 @@ export class GameRoom {
     if (this.flushing) return this.flushing;
     this.flushing = this.writeDirty().finally(() => {
       this.flushing = null;
-      if (this.dirty.size) this.scheduleFlush();                 // more edits arrived meanwhile, or a write failed: try again
+      if (this.hasDirty()) this.scheduleFlush();                 // more edits arrived meanwhile, or a write failed: try again
     });
     return this.flushing;
   }
+  async saveMeta() {                                             // the data-version record must be on disk before anything else is, or a later load would wipe the room
+    if (!this.storage || !this.loadedOk || !this.metaPending || this.seed === null) return;
+    try { await this.storage.put("meta", { v: DATA_V, w: WORLD_V, seed: this.seed }); this.metaPending = false; } catch (_) {}
+  }
   async writeDirty() {
+    await this.saveMeta();
+    if (this.metaPending) return;                                // couldn't: everything stays dirty and is retried
     const ids = [...this.dirty];
     this.dirty.clear();
     try {
@@ -208,6 +275,18 @@ export class GameRoom {
       for (const cid of ids) this.dirty.add(cid);                // nothing is lost: they stay dirty and are retried
       console.error("save failed, will retry:", err && err.message);
     }
+    const keys = [...this.invDirty];
+    this.invDirty.clear();
+    try {
+      for (let n = 0; n < keys.length; n += PUT_BATCH) {
+        const batch = {};
+        for (const k of keys.slice(n, n + PUT_BATCH)) batch["i:" + k] = this.invs.get(k);
+        await this.storage.put(batch);
+      }
+    } catch (err) {
+      for (const k of keys) this.invDirty.add(k);
+      console.error("inventory save failed, will retry:", err && err.message);
+    }
   }
 
   async fetch(request) {
@@ -222,7 +301,8 @@ export class GameRoom {
     if (!id) return new Response("Missing id", { status: 400 });
     if (this.seed === null) {
       this.seed = seedFromRoom(room);
-      if (this.storage && this.loadedOk) { try { await this.storage.put("meta", { v: 1, seed: this.seed }); } catch (_) {} }
+      this.metaPending = true;
+      await this.saveMeta();
     }
 
     const [client, server] = Object.values(new WebSocketPair());
@@ -238,7 +318,8 @@ export class GameRoom {
         ? clamp(placed[Math.floor(Math.random() * placed.length)].x + (Math.random() - 0.5) * 4, 0, W - 1)
         : W / 2 - 4 + Math.random() * 8;
     }
-    const p = { ws: server, name, x: spawnX, y: old ? old.y : null, lastSeen: now, tokens: EDIT_BURST, tokenT: now };
+    const key = nameKey(name);
+    const p = { ws: server, name, key, x: spawnX, y: old ? old.y : null, lastSeen: now, tokens: EDIT_BURST, tokenT: now, invTokens: INV_BURST, invT: now };
     this.players.set(id, p);
     if (old) { try { old.ws.close(4001, "replaced"); } catch (_) {} }
 
@@ -246,7 +327,7 @@ export class GameRoom {
     for (const [pid, q] of this.players) if (pid !== id) roster[pid] = { name: q.name, x: q.x, y: q.y };
     // the world's edits go out in slices: first slice inside init, the rest as {t:"eb"} messages right behind it
     const flat = this.flatEdits(), step = INIT_EDITS * 4, more = Math.max(0, Math.ceil(flat.length / step) - 1);
-    server.send(JSON.stringify({ t: "init", id, seed: this.seed, spawnX: p.x, players: roster, more, edits: flat.slice(0, step) }));
+    server.send(JSON.stringify({ t: "init", id, seed: this.seed, spawnX: p.x, players: roster, inv: this.invs.get(key) || null, more, edits: flat.slice(0, step) }));
     for (let i = 1; i <= more; i++) server.send(JSON.stringify({ t: "eb", edits: flat.slice(i * step, (i + 1) * step) }));
     if (!old) this.broadcast({ t: "+", id, name, x: p.x, y: p.y }, id);
 
@@ -254,12 +335,14 @@ export class GameRoom {
       if (this.players.get(id) !== p) return;           // a socket that was replaced
       p.lastSeen = Date.now();
       const raw = ev.data;
-      if (typeof raw !== "string" || raw.length > MAX_MSG) return;
+      if (typeof raw !== "string" || raw.length > MAX_INV_MSG) return;
       let m;
       try { m = JSON.parse(raw); } catch (_) { return; }
       if (!m || typeof m !== "object") return;
+      if (m.t !== "inv" && raw.length > MAX_MSG) return;         // only an inventory may be bigger than a few hundred bytes
       if (m.t === "p") this.onPosition(id, p, m);
       else if (m.t === "e") this.onEdit(id, p, m);
+      else if (m.t === "inv") this.onInventory(p, m);
     });
 
     const drop = () => {
@@ -279,7 +362,7 @@ export class GameRoom {
   onPosition(id, p, m) {
     if (!Number.isFinite(m.x) || !Number.isFinite(m.y)) return;
     p.x = clamp(m.x, 0, W - 1);
-    p.y = clamp(m.y, 0, H - 1);
+    p.y = clamp(m.y, 0, H + UNDER);
     this.broadcast({ t: "p", id, x: p.x, y: p.y }, id);
   }
 
@@ -289,7 +372,7 @@ export class GameRoom {
     if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(l) || !Number.isInteger(b)) return;
     if (x < 0 || x >= W || y < 0 || y >= H - LOCKED_ROWS) return;              // outside the world / bedrock rows
     if (l !== 0 && l !== 1) return;
-    if (b < 0 || b > MAX_BLOCK) return;
+    if (b < 0 || b > MAX_BLOCK || b === BEDROCK) return;
     if (Math.hypot(x + 0.5 - (p.x + BODY_CX), y + 0.5 - (p.y + BODY_CY)) > EDIT_REACH) return;
     const now = Date.now();                                                     // token bucket
     p.tokens = Math.min(EDIT_BURST, p.tokens + ((now - p.tokenT) / 1000) * EDIT_RATE);
@@ -301,6 +384,22 @@ export class GameRoom {
     if (this.edits.get(key) === b) return;                                      // nothing new
     this.remember(key, b, true);
     this.broadcast({ t: "e", x, y, l, b, by: id });                             // everyone, sender included; `by` lets friends animate the swing
+  }
+
+  onInventory(p, m) {
+    const c = cleanInv(m.s);
+    if (!c) return;
+    const now = Date.now();                                                     // token bucket, like edits
+    p.invTokens = Math.min(INV_BURST, p.invTokens + ((now - p.invT) / 1000) * INV_RATE);
+    p.invT = now;
+    if (p.invTokens < 1) return;
+    p.invTokens -= 1;
+    const old = this.invs.get(p.key);
+    if (!old && this.invs.size >= MAX_INVS) return;
+    if (old && JSON.stringify(old) === JSON.stringify(c)) return;               // nothing new
+    this.invs.set(p.key, c);
+    this.invDirty.add(p.key);
+    this.scheduleFlush();
   }
 
   flatEdits() {
@@ -318,7 +417,7 @@ export class GameRoom {
         this.broadcast({ t: "-", id });
       }
     }
-    if (this.players.size === 0 && this.dirty.size) this.flush();
+    if (this.players.size === 0 && this.hasDirty()) this.flush();
     if (this.players.size === 0 && this.timer) { clearInterval(this.timer); this.timer = null; }
   }
 
