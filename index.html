@@ -35,6 +35,7 @@
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
   .sp { flex: 1; }
   #status { color: #ffb347; font-size: 14px; }
+  #ping { font-size: 12px; opacity: .6; }
   #banner { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 40px; font-weight: 800;
     color: #ffcc33; text-shadow: 0 3px 12px #000; pointer-events: none; text-align: center; }
 </style>
@@ -59,6 +60,7 @@
   <div id="hud">
     <span id="roomLabel"></span>
     <span id="status"></span>
+    <span id="ping"></span>
     <span class="sp"></span>
     <button id="mute" type="button" disabled>Voice…</button>
     <button id="fs" type="button">⛶</button>
@@ -393,6 +395,55 @@ class Net {
   }
 }
 
+// ---- src/client/motion.js
+
+// --- Others: buffered interpolation (render slightly in the past, between two snapshots) ---
+const INTERP_DELAY = 100; // ms
+
+function pushSnap(buf, t, players, max) {
+  const p = new Map();
+  for (const q of players) p.set(q.i, { x: q.x, y: q.y });
+  buf.push({ t, p });
+  while (buf.length > (max || 30)) buf.shift();
+}
+
+function interpAt(buf, t) {
+  const out = new Map();
+  if (!buf.length) return out;
+  let a = buf[0], b = null;
+  for (let i = 0; i < buf.length; i++) {
+    if (buf[i].t <= t) a = buf[i];
+    else { b = buf[i]; break; }
+  }
+  if (!b || a === b || a.t > t) { for (const [id, v] of (a.t > t ? buf[0] : a).p) out.set(id, { x: v.x, y: v.y }); return out; }
+  const k = (t - a.t) / (b.t - a.t);
+  for (const [id, vb] of b.p) {
+    const va = a.p.get(id);
+    if (!va || Math.hypot(vb.x - va.x, vb.y - va.y) > 25) out.set(id, { x: vb.x, y: vb.y });
+    else out.set(id, { x: va.x + (vb.x - va.x) * k, y: va.y + (vb.y - va.y) * k });
+  }
+  return out;
+}
+
+// --- Self: client-side prediction, gently pulled toward the server ---
+const clampM = (v, a, b) => v < a ? a : v > b ? b : v;
+
+// pred: {x,y} or null; vec: [x,y] input; server: {x,y} latest authoritative; lead: seconds the server lags behind us.
+function predictStep(pred, vec, dt, server, lead) {
+  if (!server) return null;
+  if (!pred) return { x: server.x, y: server.y };
+  dt = clampM(dt, 0, 0.1);
+  pred.x = clampM(pred.x + vec[0] * SPEED * dt, PLAYER_R, ARENA - PLAYER_R);
+  pred.y = clampM(pred.y + vec[1] * SPEED * dt, PLAYER_R, ARENA - PLAYER_R);
+  const tx = clampM(server.x + vec[0] * SPEED * lead, PLAYER_R, ARENA - PLAYER_R);
+  const ty = clampM(server.y + vec[1] * SPEED * lead, PLAYER_R, ARENA - PLAYER_R);
+  const ex = tx - pred.x, ey = ty - pred.y;
+  if (Math.hypot(ex, ey) > 15) { pred.x = tx; pred.y = ty; return pred; }
+  const k = 1 - Math.exp(-dt * 6);
+  pred.x += ex * k; pred.y += ey * k;
+  return pred;
+}
+
 // ---- src/client/render.js
 
 // Fit the square arena into the canvas, below the HUD.
@@ -400,18 +451,6 @@ function layout(w, h, top) {
   const pad = 10;
   const size = Math.max(50, Math.min(w - 2 * pad, h - top - 2 * pad));
   return { size, ox: (w - size) / 2, oy: top + (h - top - size) / 2, k: size / ARENA };
-}
-
-// Smooth displayed positions toward the latest server positions.
-function smooth(disp, players, a) {
-  const seen = new Set();
-  for (const p of players) {
-    seen.add(p.i);
-    const d = disp.get(p.i);
-    if (!d || Math.hypot(d.x - p.x, d.y - p.y) > 25) disp.set(p.i, { x: p.x, y: p.y });
-    else { d.x += (p.x - d.x) * a; d.y += (p.y - d.y) * a; }
-  }
-  for (const id of [...disp.keys()]) if (!seen.has(id)) disp.delete(id);
 }
 
 function draw(ctx, w, h, top, st, myId, disp, joy, t) {
@@ -500,11 +539,13 @@ async function startVoice(cfg, room, name, id, onStatus) {
 
 
 
+
 const CFG = window.APP_CONFIG || {};
 const $ = (id) => document.getElementById(id);
 const local = store('local'), session = store('session');
 
-const app = { net: null, voice: null, st: null, wins: {}, myId: '', disp: new Map(), lastSent: '', lastSentAt: 0, room: '', name: '' };
+const app = { net: null, voice: null, st: null, wins: {}, myId: '', disp: new Map(), lastSent: '', lastSentAt: 0, room: '', name: '',
+  buf: [], pred: null, rtt: 0, pingAt: 0, pingSent: 0, lastFrame: 0 };
 
 // --- no zoom / long-press / double-tap ---
 document.addEventListener('contextmenu', e => e.preventDefault());
@@ -549,7 +590,7 @@ function join() {
   local.set('cg_name', name); local.set('cg_room', room);
   let id = session.get('cg_id');
   if (!id) { id = makeId(); session.set('cg_id', id); }
-  app.myId = id; app.room = room; app.name = name; app.st = null; app.disp.clear(); app.lastSent = '';
+  app.myId = id; app.room = room; app.name = name; app.st = null; app.disp.clear(); app.lastSent = ''; app.buf = []; app.pred = null; app.rtt = 0;
   setMsg('');
   $('roomLabel').textContent = room;
   show('game');
@@ -558,7 +599,7 @@ function join() {
     onMsg,
     onStatus: (s, why) => {
       $('status').textContent = s === 'online' ? '' : s === 'fatal' ? why : s === 'connecting' ? 'Connecting…' : 'Reconnecting…';
-      if (s === 'online') app.lastSent = '';
+      if (s === 'online') { app.lastSent = ''; app.pingSent = 0; }
       if (s === 'fatal') { leave(); setMsg(why); }
     },
   });
@@ -598,7 +639,14 @@ function leave() {
 
 function onMsg(m) {
   if (!m || typeof m !== 'object') return;
-  if (m.t === 's') { app.st = m; renderHud(); }
+  if (m.t === 's') { app.st = m; pushSnap(app.buf, performance.now(), m.p); renderHud(); }
+  else if (m.t === 'pong') {
+    if (app.pingSent) {
+      const r = performance.now() - app.pingSent; app.pingSent = 0;
+      app.rtt = app.rtt ? app.rtt * 0.7 + r * 0.3 : r;
+      $('ping').textContent = Math.round(app.rtt) + ' ms';
+    }
+  }
   else if (m.t === 'wins') { app.wins = m.w || {}; renderHud(); }
   else if (m.t === 'err') { setMsg(m.m); }
 }
@@ -636,16 +684,32 @@ window.addEventListener('resize', resize);
 resize();
 
 function frame(t) {
+  const dt = app.lastFrame ? (t - app.lastFrame) / 1000 : 0;
+  app.lastFrame = t;
   if (app.net) {
-    const v = input.vec();
-    const key = v[0] + ',' + v[1];
     const now = performance.now();
+    let v = input.vec();
+    const key = v[0] + ',' + v[1];
     if (key !== app.lastSent && now - app.lastSentAt > 66) {
       if (app.net.send({ t: 'in', x: v[0], y: v[1] })) { app.lastSent = key; app.lastSentAt = now; }
     }
-    if (app.st) smooth(app.disp, app.st.p, 0.35);
+    if (!app.pingSent && now - app.pingAt > 2000 && app.net.open) {
+      if (app.net.send({ t: 'ping' })) { app.pingSent = now; app.pingAt = now; }
+    } else if (app.pingSent && now - app.pingSent > 5000) app.pingSent = 0;
+
+    const st = app.st;
+    if (st) {
+      const shown = interpAt(app.buf, now - INTERP_DELAY);
+      const me = st.p.find(p => p.i === app.myId);
+      if (me && me.o) {
+        if (st.ph !== 'play') v = [0, 0];
+        app.pred = predictStep(app.pred, v, dt, me, (app.rtt || 100) / 1000 + 0.025);
+        shown.set(app.myId, { x: app.pred.x, y: app.pred.y });
+      } else app.pred = null;
+      app.disp = shown;
+    }
     const top = $('hud').getBoundingClientRect().bottom;
-    draw(ctx, innerWidth, innerHeight, top, app.st, app.myId, app.disp, input.joy, t);
+    draw(ctx, innerWidth, innerHeight, top, st, app.myId, app.disp, input.joy, t);
   }
   requestAnimationFrame(frame);
 }
